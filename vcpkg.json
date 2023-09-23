@@ -1,0 +1,12 @@
+{
+	"$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+	"name": "wickedengine",
+	"version-string": "0.1",
+	"dependencies": [
+		{
+			"name": "sdl2",
+			"features": [ "base", "vulkan", "x11" ]
+		}
+	],
+	"builtin-baseline": "c2fbffc288f4bd5b37dc341528aa3801cec14dc9"
+}
