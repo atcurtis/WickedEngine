@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
 
-set(VCPKG_DIR $ENV{VCPKG_DIR})
-include(${VCPKG_DIR}/scripts/buildsystems/vcpkg.cmake)
+set(VCPKG_ROOT $ENV{VCPKG_ROOT})
+include(${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
 
 option(WICKED_DYNAMIC_LIBRARY "Build WickedEngine as a dynamic library" OFF)
 

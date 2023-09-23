@@ -3,7 +3,10 @@
 	"name": "wickedengine",
 	"version-string": "0.1",
 	"dependencies": [
-		"sdl2"
+		{
+			"name": "sdl2",
+			"features": [ "base", "vulkan", "x11" ]
+		}
 	],
 	"builtin-baseline": "c2fbffc288f4bd5b37dc341528aa3801cec14dc9"
 }
