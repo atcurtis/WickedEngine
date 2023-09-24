@@ -401,13 +401,13 @@ namespace wi
 												}
 												else
 												{
-													wi::backlog::post("KTX2 transcoding error while loading image!", wi::backlog::LogLevel::Error);
+													wi::backlog::post_backlog("KTX2 transcoding error while loading image!", wi::backlog::LogLevel::Error);
 													assert(0);
 												}
 											}
 											else
 											{
-												wi::backlog::post("KTX2 transcoding error while loading image level info!", wi::backlog::LogLevel::Error);
+												wi::backlog::post_backlog("KTX2 transcoding error while loading image level info!", wi::backlog::LogLevel::Error);
 												assert(0);
 											}
 										}
@@ -533,13 +533,13 @@ namespace wi
 												}
 												else
 												{
-													wi::backlog::post("BASIS transcoding error while loading image!", wi::backlog::LogLevel::Error);
+													wi::backlog::post_backlog("BASIS transcoding error while loading image!", wi::backlog::LogLevel::Error);
 													assert(0);
 												}
 											}
 											else
 											{
-												wi::backlog::post("BASIS transcoding error while loading image level info!", wi::backlog::LogLevel::Error);
+												wi::backlog::post_backlog("BASIS transcoding error while loading image level info!", wi::backlog::LogLevel::Error);
 												assert(0);
 											}
 										}

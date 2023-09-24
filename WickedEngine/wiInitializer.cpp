@@ -27,22 +27,22 @@ namespace wi::initializer
 		ss += "\n[wi::initializer] Initializing Wicked Engine, please wait...\n";
 		ss += "Version: ";
 		ss += wi::version::GetVersionString();
-		wi::backlog::post(ss);
+		wi::backlog::post_backlog(ss);
 
 		size_t shaderdump_count = wi::renderer::GetShaderDumpCount();
 		if (shaderdump_count > 0)
 		{
-			wi::backlog::post("\nEmbedded shaders found: " + std::to_string(shaderdump_count));
+			wi::backlog::post_backlog("\nEmbedded shaders found: " + std::to_string(shaderdump_count));
 		}
 		else
 		{
-			wi::backlog::post("\nNo embedded shaders found, shaders will be compiled at runtime if needed.\n\tShader source path: " + wi::renderer::GetShaderSourcePath() + "\n\tShader binary path: " + wi::renderer::GetShaderPath());
+			wi::backlog::post_backlog("\nNo embedded shaders found, shaders will be compiled at runtime if needed.\n\tShader source path: " + wi::renderer::GetShaderSourcePath() + "\n\tShader binary path: " + wi::renderer::GetShaderPath());
 		}
 
-		wi::backlog::post("");
+		wi::backlog::post_backlog(":");
 		wi::jobsystem::Initialize();
 
-		wi::backlog::post("");
+		wi::backlog::post_backlog(":");
 		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { wi::font::Initialize(); systems[INITIALIZED_SYSTEM_FONT].store(true); });
 		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { wi::image::Initialize(); systems[INITIALIZED_SYSTEM_IMAGE].store(true); });
 		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { wi::input::Initialize(); systems[INITIALIZED_SYSTEM_INPUT].store(true); });
@@ -61,7 +61,7 @@ namespace wi::initializer
 
 		std::thread([] {
 			wi::jobsystem::Wait(ctx);
-			wi::backlog::post("\n[wi::initializer] Wicked Engine Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+			wi::backlog::post_backlog("\n[wi::initializer] Wicked Engine Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 		}).detach();
 
 	}

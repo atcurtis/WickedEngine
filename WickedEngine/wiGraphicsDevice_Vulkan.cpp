@@ -610,14 +610,14 @@ namespace vulkan_internal
 		{
 			ss += "[Vulkan Warning]: ";
 			ss += callback_data->pMessage;
-			wi::backlog::post(ss, wi::backlog::LogLevel::Warning);
+			wi::backlog::post_backlog(ss, wi::backlog::LogLevel::Warning);
 		}
 		else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 		{
 			ss += "[Vulkan Error]: ";
 			ss += callback_data->pMessage;
 #if 1
-			wi::backlog::post(ss, wi::backlog::LogLevel::Error);
+			wi::backlog::post_backlog(ss, wi::backlog::LogLevel::Error);
 #else
 			OutputDebugStringA(callback_data->pMessage);
 			OutputDebugStringA("\n");
@@ -3560,7 +3560,7 @@ using namespace vulkan_internal;
 			assert(res == VK_SUCCESS);
 		}
 
-		wi::backlog::post("Created GraphicsDevice_Vulkan (" + std::to_string((int)std::round(timer.elapsed())) + " ms)\nAdapter: " + adapterName);
+		wi::backlog::post_backlog("Created GraphicsDevice_Vulkan (" + std::to_string((int)std::round(timer.elapsed())) + " ms)\nAdapter: " + adapterName);
 	}
 	GraphicsDevice_Vulkan::~GraphicsDevice_Vulkan()
 	{

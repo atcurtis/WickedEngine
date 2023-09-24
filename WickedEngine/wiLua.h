@@ -2,6 +2,7 @@
 #include "CommonInclude.h"
 #include "wiMath.h"
 #include "wiVector.h"
+#include "wiBacklog.h"
 
 #include <string>
 
@@ -181,6 +182,7 @@ namespace wi::lua
 
 	//throw error
 	void SError(lua_State* L, const std::string& error = "");
+	void logback(lua_State* L, const std::string& message, wi::backlog::LogLevel level = wi::backlog::LogLevel::Default);
 	
 	// Compiles text file containing LUA source code to binary LUA code
 	bool CompileFile(const char* filename, wi::vector<uint8_t>& dst);
@@ -188,5 +190,6 @@ namespace wi::lua
 	// Compiles LUA source code text into binary LUA code
 	bool CompileText(const char* script, wi::vector<uint8_t>& dst);
 	inline bool CompileText(const std::string& script, wi::vector<uint8_t>& dst) { return CompileText(script.c_str(), dst); }
+	
 };
 

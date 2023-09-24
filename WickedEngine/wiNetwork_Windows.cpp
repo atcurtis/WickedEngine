@@ -26,11 +26,11 @@ namespace wi::network
 			if (result)
 			{
 				int error = WSAGetLastError();
-				wi::backlog::post("wi::network Initialization FAILED with error: " + std::to_string(error));
+				wi::backlog::post_backlog("wi::network Initialization FAILED with error: " + std::to_string(error), wi::backlog::LogLevel::Fatal);
 				assert(0);
 			}
 
-			wi::backlog::post("wi::network Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+			wi::backlog::post_backlog("wi::network Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 		}
 		~NetworkInternal()
 		{
@@ -73,7 +73,7 @@ namespace wi::network
 		if (socketinternal->handle == INVALID_SOCKET)
 		{
 			int error = WSAGetLastError();
-			wi::backlog::post("wi::network error in CreateSocket: " + std::to_string(error));
+			wi::backlog::post_backlog("wi::network error in CreateSocket: " + std::to_string(error), wi::backlog::LogLevel::Error);
 			return false;
 		}
 
@@ -98,7 +98,7 @@ namespace wi::network
 			if (result == SOCKET_ERROR)
 			{
 				int error = WSAGetLastError();
-				wi::backlog::post("wi::network error in Send: " + std::to_string(error));
+				wi::backlog::post_backlog("wi::network error in Send: " + std::to_string(error), wi::backlog::LogLevel::Error);
 				return false;
 			}
 
@@ -122,7 +122,7 @@ namespace wi::network
 			if (result == SOCKET_ERROR)
 			{
 				int error = WSAGetLastError();
-				wi::backlog::post("wi::network error in ListenPort: " + std::to_string(error));
+				wi::backlog::post_backlog("wi::network error in ListenPort: " + std::to_string(error), wi::backlog::LogLevel::Error);
 				return false;
 			}
 
@@ -147,7 +147,7 @@ namespace wi::network
 			if (result < 0)
 			{
 				int error = WSAGetLastError();
-				wi::backlog::post("wi::network error in CanReceive: " + std::to_string(error));
+				wi::backlog::post_backlog("wi::network error in CanReceive: " + std::to_string(error), wi::backlog::LogLevel::Error);
 				assert(0);
 				return false;
 			}
@@ -169,7 +169,7 @@ namespace wi::network
 			if (result == SOCKET_ERROR)
 			{
 				int error = WSAGetLastError();
-				wi::backlog::post("wi::network error in Receive: " + std::to_string(error));
+				wi::backlog::post_backlog("wi::network error in Receive: " + std::to_string(error), wi::backlog::LogLevel::Error);
 				return false;
 			}
 

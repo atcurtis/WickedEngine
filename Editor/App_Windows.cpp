@@ -139,7 +139,7 @@ public:
 		//{
 		//	editor.allow_hdr = editor.config.GetBool("allow_hdr");
 
-		//	wi::backlog::post("config.ini loaded in " + std::to_string(timer.elapsed_milliseconds()) + " milliseconds\n");
+		//	wi::backlog::post_backlog("config.ini loaded in " + std::to_string(timer.elapsed_milliseconds()) + " milliseconds\n");
 		//}
 	}
 

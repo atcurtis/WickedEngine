@@ -24,7 +24,7 @@ namespace wi::lua::backlog
 
 		if (!ss.empty())
 		{
-			wi::backlog::post(ss);
+			wi::lua::logback(L, ss);
 		}
 
 		return 0;

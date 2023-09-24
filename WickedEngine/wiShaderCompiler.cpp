@@ -74,14 +74,14 @@ namespace wi::shadercompiler
 					uint32_t major = 0;
 					hr = info->GetVersion(&major, &minor);
 					assert(SUCCEEDED(hr));
-					wi::backlog::post("wi::shadercompiler: loaded " + library + " (version: " + std::to_string(major) + "." + std::to_string(minor) + ")");
+					wi::backlog::post_backlog("wi::shadercompiler: loaded " + library + " (version: " + std::to_string(major) + "." + std::to_string(minor) + ")");
 				}
 			}
 			else
 			{
-				wi::backlog::post("wi::shadercompiler: could not load library " + library, wi::backlog::LogLevel::Error);
+				wi::backlog::post_backlog("wi::shadercompiler: could not load library " + library, wi::backlog::LogLevel::Error);
 #ifdef PLATFORM_LINUX
-				wi::backlog::post(dlerror(), wi::backlog::LogLevel::Error); // print dlopen() error detail: https://linux.die.net/man/3/dlerror
+				wi::backlog::post_backlog(dlerror(), wi::backlog::LogLevel::Error); // print dlopen() error detail: https://linux.die.net/man/3/dlerror
 #endif // PLATFORM_LINUX
 			}
 
@@ -553,7 +553,7 @@ namespace wi::shadercompiler
 				D3DCompile = (PFN_D3DCOMPILE)wiGetProcAddress(d3dcompiler, "D3DCompile");
 				if (D3DCompile != nullptr)
 				{
-					wi::backlog::post("wi::shadercompiler: loaded d3dcompiler_47.dll");
+					wi::backlog::post_backlog("wi::shadercompiler: loaded d3dcompiler_47.dll");
 				}
 			}
 		}

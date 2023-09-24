@@ -121,7 +121,7 @@ namespace wi::lua
 					std::string ss;
 					ss += WILUA_ERROR_PREFIX;
 					ss += str;
-					wi::backlog::post(ss, wi::backlog::LogLevel::Error);
+					logback(L, ss, wi::backlog::LogLevel::Error);
 					lua_pop(L, 1); // remove error message
 				}
 			}
@@ -165,7 +165,7 @@ namespace wi::lua
 		primitive::Bind();
 		Physics_BindLua::Bind();
 
-		wi::backlog::post("wi::lua Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+		wi::backlog::post_backlog("wi::lua Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 	}
 
 	lua_State* GetLuaState()
@@ -181,7 +181,7 @@ namespace wi::lua
 		std::string ss;
 		ss += WILUA_ERROR_PREFIX;
 		ss += str;
-		wi::backlog::post(ss, wi::backlog::LogLevel::Error);
+		logback(lua_internal().m_luaState, ss, wi::backlog::LogLevel::Error);
 		lua_pop(lua_internal().m_luaState, 1); // remove error message
 	}
 	bool RunScript()
@@ -468,20 +468,38 @@ namespace wi::lua
 
 	void SError(lua_State* L, const std::string& error)
 	{
-		//retrieve line number for error info
-		lua_Debug ar;
-		lua_getstack(L, 1, &ar);
-		lua_getinfo(L, "nSl", &ar);
-		int line = ar.currentline;
-
 		std::string ss;
 		ss += WILUA_ERROR_PREFIX;
-		ss += "Line " + std::to_string(line) + ": ";
 		if (!error.empty())
 		{
 			ss += error;
 		}
-		wi::backlog::post(ss, wi::backlog::LogLevel::Error);
+		logback(L, ss, wi::backlog::LogLevel::Error);
+	}
+	void logback(lua_State* L, const std::string& message, wi::backlog::LogLevel level)
+	{
+		//retrieve line number for error info
+		lua_Debug ar;
+		lua_getstack(L, 1, &ar);
+		lua_getinfo(L, "nSl", &ar);
+		
+		std::string source;
+		source += ar.short_src;
+		if (ar.source[0] == '@')
+		{
+			source = "";
+			source += ar.source + 1;
+		}
+		else if (!strncmp(ar.source, "local function script_file() return \"", 37))
+		{
+			source = "";
+			for (const char* c = ar.source + 37; *c && *c != '"'; c++)
+			{
+				source += *c;
+			}
+		}
+		
+		wi::backlog::post(source.c_str(), ar.currentline, message, level);
 	}
 
 	bool CompileFile(const char* filename, wi::vector<uint8_t>& dst)

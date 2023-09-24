@@ -492,7 +492,7 @@ namespace wi
 		wi::fftgenerator::LoadShaders();
 		fft512x512_create_plan(m_fft_plan, 3);
 
-		wi::backlog::post("wi::Ocean Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+		wi::backlog::post_backlog("wi::Ocean Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 	}
 
 	const Texture* Ocean::getDisplacementMap() const

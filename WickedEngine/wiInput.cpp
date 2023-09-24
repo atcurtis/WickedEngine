@@ -99,7 +99,7 @@ namespace wi::input
 		wi::input::ps5::Initialize();
 #endif // PLATFORM_PS5
 
-		wi::backlog::post("wi::input Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+		wi::backlog::post_backlog("wi::input Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 		initialized.store(true);
 	}
 

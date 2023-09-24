@@ -3515,7 +3515,7 @@ void EditorComponent::PostSaveText(const std::string& message, const std::string
 	save_text_message = message;
 	save_text_filename = filename;
 	save_text_alpha = time_seconds;
-	wi::backlog::post(message + filename);
+	wi::backlog::post_backlog(message + filename);
 }
 
 void EditorComponent::CheckBonePickingEnabled()

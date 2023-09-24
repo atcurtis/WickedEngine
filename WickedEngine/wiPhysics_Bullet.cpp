@@ -44,7 +44,7 @@ namespace wi::physics
 			}
 			void reportErrorWarning(const char* warningString) override
 			{
-				wi::backlog::post(warningString);
+				wi::backlog::post_backlog(warningString, wi::backlog::LogLevel::Warning);
 			}
 			void draw3dText(const btVector3& location, const char* textString) override
 			{
@@ -156,7 +156,7 @@ namespace wi::physics
 	{
 		wi::Timer timer;
 
-		wi::backlog::post("wi::physics Initialized [Bullet] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+		wi::backlog::post_backlog("wi::physics Initialized [Bullet] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 	}
 
 	bool IsEnabled() { return ENABLED; }
@@ -205,7 +205,7 @@ namespace wi::physics
 			}
 			else
 			{
-				wi::backlog::post("Convex Hull physics requested, but no MeshComponent provided!");
+				wi::backlog::post_backlog("Convex Hull physics requested, but no MeshComponent provided!", wi::backlog::LogLevel::Fatal);
 				assert(0);
 			}
 			break;
@@ -242,7 +242,7 @@ namespace wi::physics
 			}
 			else
 			{
-				wi::backlog::post("Triangle Mesh physics requested, but no MeshComponent provided!");
+				wi::backlog::post_backlog("Triangle Mesh physics requested, but no MeshComponent provided!", wi::backlog::LogLevel::Fatal);
 				assert(0);
 			}
 			break;

@@ -2066,7 +2066,7 @@ namespace wi::scene
 			}
 		}
 
-		wi::backlog::post("Scene serialize took " + std::to_string(timer.elapsed_seconds()) + " sec");
+		wi::backlog::post_backlog("Scene serialize took " + std::to_string(timer.elapsed_seconds()) + " sec");
 	}
 
 	void Scene::DDGI::Serialize(wi::Archive& archive)

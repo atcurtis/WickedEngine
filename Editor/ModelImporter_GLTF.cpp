@@ -921,7 +921,7 @@ void ImportModel_GLTF(const std::string& fileName, Scene& scene)
 				}
 				else
 				{
-					wi::backlog::post("[KHR_materials_specular warning] specularTexture must be either in surfaceMap.a or specularColorTexture.a! specularTexture discarded!", wi::backlog::LogLevel::Warning);
+					wi::backlog::post_backlog("[KHR_materials_specular warning] specularTexture must be either in surfaceMap.a or specularColorTexture.a! specularTexture discarded!", wi::backlog::LogLevel::Warning);
 				}
 			}
 			if (ext_specular->second.Has("specularColorTexture"))
@@ -3488,7 +3488,7 @@ inline std::string _ExportHelper_GetOriginalTexture(std::string texture_file)
 	for(auto& ext : original_texture_extension_iterator)
 	{
 		std::string target_file = wi::helper::ReplaceExtension(texture_file, ext);
-		wi::backlog::post(target_file);
+		wi::backlog::post_backlog(target_file);
 		if (wi::helper::FileExists(target_file))
 		{
 			return target_file;
