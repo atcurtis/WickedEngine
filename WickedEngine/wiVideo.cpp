@@ -357,7 +357,7 @@ namespace wi::video
 				}
 				else if (track.handler_type == MP4D_HANDLER_TYPE_SOUN)
 				{
-					wi::backlog::post("Audio from video file is not implemented yet!");
+					wi::backlog::post_backlog("Audio from video file is not implemented yet!");
 				}
 			}
 		}

@@ -33,17 +33,17 @@ int sdl_loop(Tests &tests)
                             if (wi::shadercompiler::GetRegisteredShaderCount() > 0)
                             {
                                 std::thread([] {
-                                    wi::backlog::post("[Shader check] Started checking " + std::to_string(wi::shadercompiler::GetRegisteredShaderCount()) + " registered shaders for changes...");
+                                    wi::backlog::post_backlog("[Shader check] Started checking " + std::to_string(wi::shadercompiler::GetRegisteredShaderCount()) + " registered shaders for changes...");
                                     if (wi::shadercompiler::CheckRegisteredShadersOutdated())
                                     {
-                                        wi::backlog::post("[Shader check] Changes detected, initiating reload...");
+                                        wi::backlog::post_backlog("[Shader check] Changes detected, initiating reload...");
                                         wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [](uint64_t userdata) {
                                             wi::renderer::ReloadShaders();
                                             });
                                     }
                                     else
                                     {
-                                        wi::backlog::post("[Shader check] All up to date");
+                                        wi::backlog::post_backlog("[Shader check] All up to date");
                                     }
                                     }).detach();
                             }

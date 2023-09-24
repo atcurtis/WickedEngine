@@ -95,7 +95,7 @@ namespace wi::audio
 
 			if (masteringVoice == nullptr)
 			{
-				wi::backlog::post("Failed to create XAudio2 mastering voice!");
+				wi::backlog::post_backlog("Failed to create XAudio2 mastering voice!", wi::backlog::LogLevel::Warning);
 				return;
 			}
 
@@ -143,7 +143,7 @@ namespace wi::audio
 				}
 				else
 				{
-					wi::backlog::post("wi::audio [XAudio2] Reverb Submix was not created successfully!", wi::backlog::LogLevel::Warning);
+					wi::backlog::post_backlog("wi::audio [XAudio2] Reverb Submix was not created successfully!", wi::backlog::LogLevel::Warning);
 				}
 			}
 
@@ -153,7 +153,7 @@ namespace wi::audio
 
 			if (SUCCEEDED(hr))
 			{
-				wi::backlog::post("wi::audio Initialized [XAudio2] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+				wi::backlog::post_backlog("wi::audio Initialized [XAudio2] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 			}
 		}
 		~AudioInternal()
@@ -761,7 +761,7 @@ namespace wi::audio
 
 			if (success)
 			{
-				wi::backlog::post("wi::audio Initialized [FAudio] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+				wi::backlog::post_backlog("wi::audio Initialized [FAudio] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 			}
 		}
 		~AudioInternal(){

@@ -1452,7 +1452,7 @@ namespace wi::scene
 					auto error = device.getError(errorMessage);
 					if (error != oidn::Error::None && error != oidn::Error::Cancelled)
 					{
-						wi::backlog::post(std::string("[OpenImageDenoise error] ") + errorMessage);
+						wi::backlog::post_backlog(std::string("[OpenImageDenoise error] ") + errorMessage);
 					}
 					else
 					{

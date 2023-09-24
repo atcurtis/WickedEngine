@@ -135,7 +135,7 @@ namespace wi
 		pugi::xml_parse_result result = doc.load_buffer_inplace(filedata.data(), filedata.size());
 		if (result.status != pugi::xml_parse_status::status_ok)
 		{
-			wi::backlog::post("XML error in " + filename + " at offset = " + std::to_string(result.offset) + ": " + result.description(), wi::backlog::LogLevel::Warning);
+			wi::backlog::post_backlog("XML error in " + filename + " at offset = " + std::to_string(result.offset) + ": " + result.description(), wi::backlog::LogLevel::Warning);
 			return false;
 		}
 

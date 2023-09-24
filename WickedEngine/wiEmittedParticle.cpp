@@ -919,7 +919,7 @@ namespace wi
 		static wi::eventhandler::Handle handle = wi::eventhandler::Subscribe(wi::eventhandler::EVENT_RELOAD_SHADERS, [](uint64_t userdata) { EmittedParticleSystem_Internal::LoadShaders(); });
 		EmittedParticleSystem_Internal::LoadShaders();
 
-		wi::backlog::post("wi::EmittedParticleSystem Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+		wi::backlog::post_backlog("wi::EmittedParticleSystem Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 	}
 
 

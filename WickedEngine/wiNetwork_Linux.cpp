@@ -47,7 +47,7 @@ namespace wi::network
 
 		if(socketinternal->handle == -1)
 		{
-			wi::backlog::post("wi::network_Linux error in CreateSocket: Could not create socket");
+			wi::backlog::post_backlog("wi::network_Linux error in CreateSocket: Could not create socket", wi::backlog::LogLevel::Error);
 			return false;
 		}
 
@@ -71,7 +71,7 @@ namespace wi::network
 			int result = sendto(socketinternal->handle, (const char*)data, (int)dataSize, 0, (const sockaddr*)&target, sizeof(target));
 			if (result < 0)
 			{
-				wi::backlog::post("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)));
+				wi::backlog::post_backlog("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)), wi::backlog::LogLevel::Error);
 				return false;
 			}
 
@@ -93,7 +93,7 @@ namespace wi::network
 			int result = bind(socketinternal->handle, (struct sockaddr *)&target , sizeof(target));
 			if (result < 0)
 			{
-				wi::backlog::post("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)));
+				wi::backlog::post_backlog("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)), wi::backlog::LogLevel::Error);
 				return false;
 			}
 
@@ -117,7 +117,7 @@ namespace wi::network
 			int result = select(0, &readfds, NULL, NULL, &timeout);
 			if (result < 0)
 			{
-				wi::backlog::post("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)));
+				wi::backlog::post_backlog("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)), wi::backlog::LogLevel::Fatal);
 				assert(0);
 				return false;
 			}
@@ -137,7 +137,7 @@ namespace wi::network
 			int result = recvfrom(socketinternal->handle, (char*)data, (int)dataSize, 0, (sockaddr*)& sender, (socklen_t*)&targetsize);
 			if (result < 0)
 			{
-				wi::backlog::post("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)));
+				wi::backlog::post_backlog("wi::network_Linux error in Send: (Error Code: " + std::to_string(result) + ") " + std::string(strerror(result)), wi::backlog::LogLevel::Fatal);
 				assert(0);
 				return false;
 			}

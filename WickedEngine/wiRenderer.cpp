@@ -670,7 +670,7 @@ bool LoadShader(
 		}
 		else
 		{
-			wi::backlog::post("shader dump doesn't contain shader: " + shaderbinaryfilename, wi::backlog::LogLevel::Error);
+			wi::backlog::post_backlog("shader dump doesn't contain shader: " + shaderbinaryfilename, wi::backlog::LogLevel::Error);
 		}
 #endif // SHADERDUMP_ENABLED
 	}
@@ -700,14 +700,14 @@ bool LoadShader(
 
 			if (!output.error_message.empty())
 			{
-				wi::backlog::post(output.error_message, wi::backlog::LogLevel::Warning);
+				wi::backlog::post_backlog(output.error_message, wi::backlog::LogLevel::Warning);
 			}
-			wi::backlog::post("shader compiled: " + shaderbinaryfilename);
+			wi::backlog::post_backlog("shader compiled: " + shaderbinaryfilename);
 			return device->CreateShader(stage, output.shaderdata, output.shadersize, &shader);
 		}
 		else
 		{
-			wi::backlog::post("shader compile FAILED: " + shaderbinaryfilename + "\n" + output.error_message, wi::backlog::LogLevel::Error);
+			wi::backlog::post_backlog("shader compile FAILED: " + shaderbinaryfilename + "\n" + output.error_message, wi::backlog::LogLevel::Error);
 			SHADER_ERRORS.fetch_add(1);
 		}
 	}
@@ -2385,7 +2385,7 @@ void Initialize()
 	static wi::eventhandler::Handle handle2 = wi::eventhandler::Subscribe(wi::eventhandler::EVENT_RELOAD_SHADERS, [](uint64_t userdata) { LoadShaders(); });
 	LoadShaders();
 
-	wi::backlog::post("wi::renderer Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+	wi::backlog::post_backlog("wi::renderer Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 }
 void ClearWorld(Scene& scene)
 {
@@ -7479,7 +7479,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 				info += "\n\tFormat = ";
 				info += GetFormatString(desc.format);
 				info += "\n\tMemory = " + wi::helper::GetMemorySizeText(ComputeTextureMemorySizeInBytes(desc)) + "\n";
-				wi::backlog::post(info);
+				wi::backlog::post_backlog(info);
 			}
 
 			if (!envrenderingColorBuffer.IsValid())
@@ -7512,7 +7512,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 				info += "\n\tFormat = ";
 				info += GetFormatString(desc.format);
 				info += "\n\tMemory = " + wi::helper::GetMemorySizeText(ComputeTextureMemorySizeInBytes(desc)) + "\n";
-				wi::backlog::post(info);
+				wi::backlog::post_backlog(info);
 			}
 
 			if (!envrenderingColorBuffer_Filtered.IsValid())
@@ -7545,7 +7545,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 				info += "\n\tFormat = ";
 				info += GetFormatString(desc.format);
 				info += "\n\tMemory = " + wi::helper::GetMemorySizeText(ComputeTextureMemorySizeInBytes(desc)) + "\n";
-				wi::backlog::post(info);
+				wi::backlog::post_backlog(info);
 			}
 
 			if (required_sample_count > 1)
@@ -7577,7 +7577,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 					info += "\n\tFormat = ";
 					info += GetFormatString(desc.format);
 					info += "\n\tMemory = " + wi::helper::GetMemorySizeText(ComputeTextureMemorySizeInBytes(desc)) + "\n";
-					wi::backlog::post(info);
+					wi::backlog::post_backlog(info);
 				}
 			}
 		}
@@ -9020,7 +9020,7 @@ void BlockCompress(const Texture& texture_src, const Texture& texture_bc, Comman
 			size_t total_size = 0;
 			total_size += ComputeTextureMemorySizeInBytes(bc_raw_desc);
 			info += "\n\tMemory = " + wi::helper::GetMemorySizeText(total_size) + "\n";
-			wi::backlog::post(info);
+			wi::backlog::post_backlog(info);
 		}
 
 		bc_raw_dest = *bc_raw;

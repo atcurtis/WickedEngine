@@ -3,6 +3,7 @@
 	"name": "wickedengine",
 	"version-string": "0.1",
 	"dependencies": [
+		"glog",
 		{
 			"name": "sdl2",
 			"features": [ "base", "vulkan", "x11" ]

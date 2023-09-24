@@ -95,7 +95,7 @@ void ImportModel_OBJ(const std::string& fileName, Scene& scene)
 
 	if (!obj_errors.empty())
 	{
-		wi::backlog::post(obj_errors, wi::backlog::LogLevel::Error);
+		wi::backlog::post_backlog(obj_errors, wi::backlog::LogLevel::Error);
 	}
 
 	if (success)

@@ -101,7 +101,7 @@ namespace wi::profiler
 			superluminal_handle = PerformanceAPI_LoadFrom(L"PerformanceAPI.dll", &superluminal_functions);
 			if (superluminal_handle)
 			{
-				wi::backlog::post("[wi::profiler] Superluminal Performance API loaded");
+				wi::backlog::post_backlog("[wi::profiler] Superluminal Performance API loaded");
 			}
 #endif // PERFORMANCEAPI_ENABLED
 		}

@@ -298,7 +298,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		}
 		else
 		{
-			wi::backlog::post("Couldn't import localization file: " + filename, wi::backlog::LogLevel::Warning);
+			wi::backlog::post_backlog("Couldn't import localization file: " + filename, wi::backlog::LogLevel::Warning);
 		}
 	});
 	AddWidget(&languageCombo);

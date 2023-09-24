@@ -34,7 +34,7 @@ namespace wi::input::sdlinput
 
     void Initialize() {
         if(!SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt")){
-            wi::backlog::post("[SDL Input] No controller config loaded, add gamecontrollerdb.txt file next to the executable or download it from https://github.com/gabomdq/SDL_GameControllerDB");
+            wi::backlog::post_backlog("[SDL Input] No controller config loaded, add gamecontrollerdb.txt file next to the executable or download it from https://github.com/gabomdq/SDL_GameControllerDB");
         }
     }
 
@@ -203,7 +203,7 @@ namespace wi::input::sdlinput
                 case SDL_FINGERDOWN:
                 case SDL_FINGERUP:
                 case SDL_FINGERMOTION:
-                    wi::backlog::post("finger!");
+                    wi::backlog::post_backlog("finger!");
                     break;
 
 
@@ -211,7 +211,7 @@ namespace wi::input::sdlinput
                 case SDL_DOLLARGESTURE:
                 case SDL_DOLLARRECORD:
                 case SDL_MULTIGESTURE:
-                    wi::backlog::post("gesture!");
+                    wi::backlog::post_backlog("gesture!");
                     break;
                 default:
                     break;

@@ -776,7 +776,7 @@ namespace wi::helper
 				}
 				else
 				{
-					wi::backlog::post("basisu::basis_compressor::process() failure!", wi::backlog::LogLevel::Error);
+					wi::backlog::post_backlog("basisu::basis_compressor::process() failure!", wi::backlog::LogLevel::Error);
 					assert(0);
 				}
 			}
@@ -1054,7 +1054,7 @@ namespace wi::helper
 				switch (ex.code())
 				{
 				case E_ACCESSDENIED:
-					wi::backlog::post("Opening file failed: " + fileName + " | Reason: Permission Denied!");
+					wi::backlog::post_backlog("Opening file failed: " + fileName + " | Reason: Permission Denied!");
 					break;
 				default:
 					break;
@@ -1079,7 +1079,7 @@ namespace wi::helper
 
 #endif // PLATFORM_UWP
 
-		wi::backlog::post("File not found: " + fileName, wi::backlog::LogLevel::Warning);
+		wi::backlog::post_backlog("File not found: " + fileName, wi::backlog::LogLevel::Warning);
 		return false;
 	}
 	bool FileRead(const std::string& fileName, wi::vector<uint8_t>& data)
@@ -1139,7 +1139,7 @@ namespace wi::helper
 				switch (ex.code())
 				{
 				case E_ACCESSDENIED:
-					wi::backlog::post("Opening file failed: " + fileName + " | Reason: Permission Denied!");
+					wi::backlog::post_backlog("Opening file failed: " + fileName + " | Reason: Permission Denied!");
 					break;
 				default:
 					break;
@@ -1192,7 +1192,7 @@ namespace wi::helper
 				switch (ex.code())
 				{
 				case E_ACCESSDENIED:
-					wi::backlog::post("Opening file failed: " + fileName + " | Reason: Permission Denied!");
+					wi::backlog::post_backlog("Opening file failed: " + fileName + " | Reason: Permission Denied!");
 					break;
 				default:
 					break;
@@ -1640,18 +1640,18 @@ namespace wi::helper
 #ifdef PLATFORM_WINDOWS_DESKTOP
 		std::string op = "start " + url;
 		int status = system(op.c_str());
-		wi::backlog::post("wi::helper::OpenUrl(" + url + ") returned status: " + std::to_string(status));
+		wi::backlog::post_backlog("wi::helper::OpenUrl(" + url + ") returned status: " + std::to_string(status));
 		return;
 #endif // PLATFORM_WINDOWS_DESKTOP
 
 #ifdef PLATFORM_LINUX
 		std::string op = "xdg-open " + url;
 		int status = system(op.c_str());
-		wi::backlog::post("wi::helper::OpenUrl(" + url + ") returned status: " + std::to_string(status));
+		wi::backlog::post_backlog("wi::helper::OpenUrl(" + url + ") returned status: " + std::to_string(status));
 		return;
 #endif // PLATFORM_WINDOWS_DESKTOP
 
-		wi::backlog::post("wi::helper::OpenUrl(" + url + "): not implemented for this operating system!", wi::backlog::LogLevel::Warning);
+		wi::backlog::post_backlog("wi::helper::OpenUrl(" + url + "): not implemented for this operating system!", wi::backlog::LogLevel::Warning);
 	}
 
 	MemoryUsage GetMemoryUsage()

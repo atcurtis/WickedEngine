@@ -2972,7 +2972,7 @@ using namespace dx12_internal;
 			wi::helper::messageBox(ss.str(), "Warning!");
 		}
 
-		wi::backlog::post("Created GraphicsDevice_DX12 (" + std::to_string((int)std::round(timer.elapsed())) + " ms)\nAdapter: " + adapterName);
+		wi::backlog::post_backlog("Created GraphicsDevice_DX12 (" + std::to_string((int)std::round(timer.elapsed())) + " ms)\nAdapter: " + adapterName);
 	}
 	GraphicsDevice_DX12::~GraphicsDevice_DX12()
 	{
@@ -5547,7 +5547,7 @@ using namespace dx12_internal;
 
 		if (!log.empty())
 		{
-			wi::backlog::post(log, wi::backlog::LogLevel::Error);
+			wi::backlog::post_backlog(log, wi::backlog::LogLevel::Error);
 		}
 
 		std::string message = "D3D12: device removed, cause: ";

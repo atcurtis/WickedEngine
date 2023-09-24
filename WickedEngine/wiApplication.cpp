@@ -565,7 +565,7 @@ namespace wi
 #elif defined(WICKEDENGINE_BUILD_VULKAN)
 				use_vulkan = true;
 #else
-				wi::backlog::post("No rendering backend is enabled! Please enable at least one so we can use it as default", wi::backlog::LogLevel::Error);
+				wi::backlog::post_backlog("No rendering backend is enabled! Please enable at least one so we can use it as default", wi::backlog::LogLevel::Fatal);
 				assert(false);
 #endif
 			}

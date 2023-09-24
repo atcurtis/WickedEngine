@@ -53,7 +53,7 @@ namespace wi::font
 
 				if (!stbtt_InitFont(&fontInfo, data, offset))
 				{
-					wi::backlog::post("Failed to load font: " + name + " (file was unrecognized, it must be a .ttf file)");
+					wi::backlog::post_backlog("Failed to load font: " + name + " (file was unrecognized, it must be a .ttf file)", wi::backlog::LogLevel::Warning);
 				}
 
 				stbtt_GetFontVMetrics(&fontInfo, &ascent, &descent, &lineGap);
@@ -66,7 +66,7 @@ namespace wi::font
 				}
 				else
 				{
-					wi::backlog::post("Failed to load font: " + name + " (file could not be opened)");
+					wi::backlog::post_backlog("Failed to load font: " + name + " (file could not be opened)", wi::backlog::LogLevel::Warning);
 				}
 			}
 		};
@@ -328,7 +328,7 @@ namespace wi::font
 		static wi::eventhandler::Handle handle1 = wi::eventhandler::Subscribe(wi::eventhandler::EVENT_RELOAD_SHADERS, [](uint64_t userdata) { LoadShaders(); });
 		LoadShaders();
 
-		wi::backlog::post("wi::font Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+		wi::backlog::post_backlog("wi::font Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 	}
 
 	void InvalidateAtlas()
