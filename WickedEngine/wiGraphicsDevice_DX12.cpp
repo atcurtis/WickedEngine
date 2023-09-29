@@ -3396,18 +3396,24 @@ using namespace dx12_internal;
 			if (has_flag(desc->bind_flags, BindFlag::UNORDERED_ACCESS))
 			{
 				CreateSubresource(buffer, SubresourceType::UAV, 0);
-
-				if (has_flag(desc->bind_flags, BindFlag::UNORDERED_ACCESS) && !has_flag(desc->misc_flags, ResourceMiscFlag::BUFFER_RAW))
-				{
-					// Create raw buffer if doesn't exist for ClearUAV:
-					D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-					uav_desc.Format = DXGI_FORMAT_R32_TYPELESS;
-					uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-					uav_desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
-					uav_desc.Buffer.NumElements = uint32_t(desc->size / sizeof(uint32_t));
-					internal_state->uav_raw.init(this, uav_desc, internal_state->resource.Get());
-				}
 			}
+		}
+
+		if (
+			has_flag(desc->bind_flags, BindFlag::UNORDERED_ACCESS) &&
+			(
+				!has_flag(desc->misc_flags, ResourceMiscFlag::BUFFER_RAW) ||
+				has_flag(desc->misc_flags, ResourceMiscFlag::NO_DEFAULT_DESCRIPTORS)
+			)
+		)
+		{
+			// Create raw buffer if doesn't exist for ClearUAV:
+			D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+			uav_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+			uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+			uav_desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+			uav_desc.Buffer.NumElements = uint32_t(desc->size / sizeof(uint32_t));
+			internal_state->uav_raw.init(this, uav_desc, internal_state->resource.Get());
 		}
 
 		return SUCCEEDED(hr);
@@ -3555,6 +3561,7 @@ using namespace dx12_internal;
 			}
 		}
 
+#ifndef PLATFORM_XBOX // Xbox is detected as UMA, but the UMA texture upload path is disabled for now
 		if (
 			initial_data != nullptr &&
 			allocationDesc.HeapType == D3D12_HEAP_TYPE_DEFAULT &&
@@ -3565,6 +3572,7 @@ using namespace dx12_internal;
 			//	It will be used with WriteToSubresource to avoid GPU copy from UPLOAD to DEAFULT
 			allocationDesc.CustomPool = allocationhandler->uma_pool.Get();
 		}
+#endif // PLATFORM_XBOX
 
 #ifdef PLATFORM_XBOX
 		wi::graphics::xbox::ApplyTextureCreationFlags(texture->desc, resourcedesc.Flags, allocationDesc.ExtraHeapFlags);
