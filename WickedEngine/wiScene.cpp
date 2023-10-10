@@ -881,7 +881,7 @@ namespace wi::scene
 		}
 	}
 
-	void Scene::Entity_Remove(Entity entity, bool recursive)
+	void Scene::Entity_Remove(Entity entity, bool recursive, bool keep_sorted)
 	{
 		if (recursive)
 		{
@@ -903,7 +903,14 @@ namespace wi::scene
 
 		for (auto& entry : componentLibrary.entries)
 		{
-			entry.second.component_manager->Remove(entity);
+			if (keep_sorted)
+			{
+				entry.second.component_manager->Remove_KeepSorted(entity);
+			}
+			else
+			{
+				entry.second.component_manager->Remove(entity);
+			}
 		}
 	}
 	Entity Scene::Entity_FindByName(const std::string& name, Entity ancestor)
@@ -1379,6 +1386,86 @@ namespace wi::scene
 		mesh.indices = {
 			0, 1, 2, 0, 2, 3,
 		};
+
+		// Subset maps a part of the mesh to a material:
+		MeshComponent::MeshSubset& subset = mesh.subsets.emplace_back();
+		subset.indexCount = uint32_t(mesh.indices.size());
+		materials.Create(entity);
+		subset.materialID = entity; // the material component is created on the same entity as the mesh component, though it is not required as it could also use a different material entity
+
+		// vertex buffer GPU data will be packed and uploaded here:
+		mesh.CreateRenderData();
+
+		return entity;
+	}
+	Entity Scene::Entity_CreateSphere(
+		const std::string& name,
+		float radius,
+		uint32_t latitudeBands,
+		uint32_t longitudeBands
+	)
+	{
+		Entity entity = CreateEntity();
+
+		if (!name.empty())
+		{
+			names.Create(entity) = name;
+		}
+
+		layers.Create(entity);
+
+		transforms.Create(entity);
+
+		ObjectComponent& object = objects.Create(entity);
+
+		MeshComponent& mesh = meshes.Create(entity);
+
+		// object references the mesh entity (there can be multiple objects referencing one mesh):
+		object.meshID = entity;
+
+		for (uint32_t latNumber = 0; latNumber <= latitudeBands; latNumber++)
+		{
+			float theta = float(latNumber) * XM_PI / float(latitudeBands);
+			float sinTheta = sin(theta);
+			float cosTheta = cos(theta);
+
+			for (uint32_t longNumber = 0; longNumber <= longitudeBands; longNumber++)
+			{
+				float phi = float(longNumber) * 2 * XM_PI / float(longitudeBands);
+				float sinPhi = sin(phi);
+				float cosPhi = cos(phi);
+
+				XMFLOAT3& position = mesh.vertex_positions.emplace_back();
+				XMFLOAT3& normal = mesh.vertex_normals.emplace_back();
+				XMFLOAT2& uv = mesh.vertex_uvset_0.emplace_back();
+
+				normal.x = cosPhi * sinTheta;   // x
+				normal.y = cosTheta;            // y
+				normal.z = sinPhi * sinTheta;   // z
+				uv.x = float(longNumber) / float(longitudeBands); // u
+				uv.y = float(latNumber) / float(latitudeBands);   // v
+				position.x = radius * normal.x;
+				position.y = radius * normal.y;
+				position.z = radius * normal.z;
+			}
+		}
+
+		for (uint32_t latNumber = 0; latNumber < latitudeBands; latNumber++)
+		{
+			for (uint32_t longNumber = 0; longNumber < longitudeBands; longNumber++)
+			{
+				uint32_t first = (latNumber * (longitudeBands + 1)) + longNumber;
+				uint32_t second = first + longitudeBands + 1;
+
+				mesh.indices.push_back(first);
+				mesh.indices.push_back(second);
+				mesh.indices.push_back(first + 1);
+
+				mesh.indices.push_back(second);
+				mesh.indices.push_back(second + 1);
+				mesh.indices.push_back(first + 1);
+			}
+		}
 
 		// Subset maps a part of the mesh to a material:
 		MeshComponent::MeshSubset& subset = mesh.subsets.emplace_back();
@@ -3826,10 +3913,18 @@ namespace wi::scene
 						}
 					}
 					instance.instance_id = args.jobIndex;
-					instance.instance_mask = layerMask & 0xFF;
+					instance.instance_mask = layerMask == 0 ? 0 : 0xFF;
 					if (!object.IsRenderable() || !mesh.IsRenderable())
 					{
 						instance.instance_mask = 0;
+					}
+					if (!object.IsCastingShadow())
+					{
+						instance.instance_mask ^= wi::renderer::raytracing_inclusion_mask_shadow;
+					}
+					if (object.IsNotVisibleInReflections())
+					{
+						instance.instance_mask ^= wi::renderer::raytracing_inclusion_mask_reflection;
 					}
 					instance.bottom_level = &mesh.BLASes[object.lod];
 					instance.instance_contribution_to_hit_group_index = 0;
@@ -3948,6 +4043,7 @@ namespace wi::scene
 			XMMATRIX W = XMLoadFloat4x4(&decal.world);
 			XMVECTOR front = XMVectorSet(0, 0, -1, 0);
 			front = XMVector3TransformNormal(front, W);
+			front = XMVector3Normalize(front);
 			XMStoreFloat3(&decal.front, front);
 
 			XMVECTOR S, R, T;
@@ -4205,7 +4301,7 @@ namespace wi::scene
 						}
 					}
 					instance.instance_id = (uint32_t)instanceIndex;
-					instance.instance_mask = hair.layerMask & 0xFF;
+					instance.instance_mask = hair.layerMask == 0 ? 0 : 0xFF;
 					instance.bottom_level = &hair.BLAS;
 					instance.instance_contribution_to_hit_group_index = 0;
 					instance.flags = RaytracingAccelerationStructureDesc::TopLevel::Instance::FLAG_TRIANGLE_CULL_DISABLE;
@@ -4304,7 +4400,7 @@ namespace wi::scene
 					}
 				}
 				instance.instance_id = (uint32_t)instanceIndex;
-				instance.instance_mask = emitter.layerMask & 0xFF;
+				instance.instance_mask = emitter.layerMask == 0 ? 0 : 0xFF;
 				instance.bottom_level = &emitter.BLAS;
 				instance.instance_contribution_to_hit_group_index = 0;
 				instance.flags = RaytracingAccelerationStructureDesc::TopLevel::Instance::FLAG_TRIANGLE_CULL_DISABLE;
@@ -4376,10 +4472,6 @@ namespace wi::scene
 			else
 			{
 				wi::audio::Stop(&sound.soundinstance);
-			}
-			if (!sound.IsLooped())
-			{
-				wi::audio::ExitLoop(&sound.soundinstance);
 			}
 			wi::audio::SetVolume(sound.volume, &sound.soundinstance);
 		}
@@ -4565,7 +4657,22 @@ namespace wi::scene
 						// Note: we do the TMin, Tmax check here, in world space! We use the RayTriangleIntersects in local space, so we don't use those in there
 						if (distance < result.distance && distance >= ray.TMin && distance <= ray.TMax)
 						{
-							const XMVECTOR nor = XMVector3Normalize(XMVector3TransformNormal(XMVector3Cross(XMVectorSubtract(p2, p1), XMVectorSubtract(p1, p0)), objectMat));
+							XMVECTOR nor;
+							if (mesh->vertex_normals.empty())
+							{
+								nor = XMVector3Cross(p2 - p1, p1 - p0);
+							}
+							else
+							{
+								nor = XMVectorBaryCentric(
+									XMLoadFloat3(&mesh->vertex_normals[i0]),
+									XMLoadFloat3(&mesh->vertex_normals[i1]),
+									XMLoadFloat3(&mesh->vertex_normals[i2]),
+									bary.x,
+									bary.y
+								);
+							}
+							nor = XMVector3Normalize(XMVector3TransformNormal(nor, objectMat));
 							const XMVECTOR vel = pos - XMVector3Transform(pos_local, objectMatPrev);
 
 							result.entity = entity;
@@ -4752,7 +4859,7 @@ namespace wi::scene
 						return;
 
 					// Compute the plane of the triangle (has to be normalized).
-					XMVECTOR N = XMVector3Normalize(XMVector3Cross(XMVectorSubtract(p1, p0), XMVectorSubtract(p2, p0)));
+					XMVECTOR N = XMVector3Normalize(XMVector3Cross(p1 - p0, p2 - p0));
 
 					// Assert that the triangle is not degenerate.
 					assert(!XMVector3Equal(N, XMVectorZero()));
@@ -4854,6 +4961,8 @@ namespace wi::scene
 
 							XMVECTOR vel = bestPoint - XMVector3Transform(XMVector3Transform(bestPoint, objectMatInverse), objectMatPrev);
 							XMStoreFloat3(&result.velocity, vel);
+
+							result.subsetIndex = (int)subsetIndex;
 						}
 					}
 				};
@@ -4901,6 +5010,15 @@ namespace wi::scene
 			}
 		}
 
+		// Construct a matrix that will orient to position (P) according to surface normal (N):
+		XMVECTOR N = XMLoadFloat3(&result.normal);
+		XMVECTOR P = XMLoadFloat3(&result.position);
+		XMVECTOR E = Center - P;
+		XMVECTOR T = XMVector3Normalize(XMVector3Cross(N, P - E));
+		XMVECTOR B = XMVector3Normalize(XMVector3Cross(T, N));
+		XMMATRIX M = { T, N, B, P };
+		XMStoreFloat4x4(&result.orientation, M);
+
 		return result;
 	}
 	Scene::CapsuleIntersectionResult Scene::Intersects(const Capsule& capsule, uint32_t filterMask, uint32_t layerMask, uint32_t lod) const
@@ -4910,7 +5028,8 @@ namespace wi::scene
 		const XMVECTOR Base = XMLoadFloat3(&capsule.base);
 		const XMVECTOR Tip = XMLoadFloat3(&capsule.tip);
 		const XMVECTOR Radius = XMVectorReplicate(capsule.radius);
-		const XMVECTOR LineEndOffset = XMVector3Normalize(Tip - Base) * Radius;
+		const XMVECTOR Axis = XMVector3Normalize(Tip - Base);
+		const XMVECTOR LineEndOffset = Axis * Radius;
 		const XMVECTOR A = Base + LineEndOffset;
 		const XMVECTOR B = Tip - LineEndOffset;
 		const XMVECTOR RadiusSq = XMVectorMultiply(Radius, Radius);
@@ -5029,7 +5148,7 @@ namespace wi::scene
 						return;
 
 					// Compute the plane of the triangle (has to be normalized).
-					XMVECTOR N = XMVector3Normalize(XMVector3Cross(XMVectorSubtract(p1, p0), XMVectorSubtract(p2, p0)));
+					XMVECTOR N = XMVector3Normalize(XMVector3Cross(p1 - p0, p2 - p0));
 
 					XMVECTOR ReferencePoint;
 					XMVECTOR d = XMVector3Normalize(B - A);
@@ -5243,6 +5362,8 @@ namespace wi::scene
 
 							XMVECTOR vel = bestPoint - XMVector3Transform(XMVector3Transform(bestPoint, objectMat_Inverse), objectMatPrev);
 							XMStoreFloat3(&result.velocity, vel);
+
+							result.subsetIndex = (int)subsetIndex;
 						}
 					}
 				};
@@ -5291,6 +5412,15 @@ namespace wi::scene
 
 			}
 		}
+
+		// Construct a matrix that will orient to position (P) according to surface normal (N):
+		XMVECTOR N = XMLoadFloat3(&result.normal);
+		XMVECTOR P = XMLoadFloat3(&result.position);
+		XMVECTOR E = Axis;
+		XMVECTOR T = XMVector3Normalize(XMVector3Cross(N, P - E));
+		XMVECTOR Binorm = XMVector3Normalize(XMVector3Cross(T, N));
+		XMMATRIX M = { T, N, Binorm, P };
+		XMStoreFloat4x4(&result.orientation, M);
 
 		return result;
 	}

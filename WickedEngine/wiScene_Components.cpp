@@ -1733,6 +1733,8 @@ namespace wi::scene
 		XMVECTOR _Up = XMLoadFloat3(&Up);
 		XMMATRIX _Ref = XMMatrixReflect(XMLoadFloat4(&plane));
 
+		clipPlaneOriginal = plane;
+
 		// reverse clipping if behind clip plane ("if underwater")
 		clipPlane = plane;
 		float d = XMVectorGetX(XMPlaneDotCoord(XMLoadFloat4(&clipPlane), _Eye));
@@ -1784,6 +1786,32 @@ namespace wi::scene
 	{
 		_flags &= ~PLAYING;
 		wi::audio::Stop(&soundinstance);
+	}
+	void SoundComponent::SetLooped(bool value)
+	{
+		soundinstance.SetLooped(value);
+		if (value)
+		{
+			_flags |= LOOPED;
+			wi::audio::CreateSoundInstance(&soundResource.GetSound(), &soundinstance);
+		}
+		else
+		{
+			_flags &= ~LOOPED;
+			wi::audio::ExitLoop(&soundinstance);
+		}
+	}
+	void SoundComponent::SetDisable3D(bool value)
+	{
+		if (value)
+		{
+			_flags |= DISABLE_3D;
+		}
+		else
+		{
+			_flags &= ~DISABLE_3D;
+		}
+		wi::audio::CreateSoundInstance(&soundResource.GetSound(), &soundinstance);
 	}
 
 }

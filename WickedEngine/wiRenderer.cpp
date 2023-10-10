@@ -590,12 +590,11 @@ PipelineState PSO_renderlightmap;
 PipelineState PSO_lensflare;
 
 PipelineState PSO_downsampledepthbuffer;
-PipelineState PSO_deferredcomposition;
-PipelineState PSO_sss_skin;
-PipelineState PSO_sss_snow;
 PipelineState PSO_upsample_bilateral;
 PipelineState PSO_volumetricclouds_upsample;
 PipelineState PSO_outline;
+PipelineState PSO_copyDepth;
+PipelineState PSO_copyStencilBit[8];
 
 RaytracingPipelineState RTPSO_reflection;
 
@@ -808,6 +807,7 @@ void LoadShaders()
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_POSTPROCESS], "postprocessVS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_LENSFLARE], "lensFlareVS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_DDGI_DEBUG], "ddgi_debugVS.cso"); });
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_SCREEN], "screenVS.cso"); });
 
 	if (device->CheckCapability(GraphicsDeviceCapability::RENDERTARGET_AND_VIEWPORT_ARRAYINDEX_WITHOUT_GS))
 	{
@@ -877,6 +877,8 @@ void LoadShaders()
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_LENSFLARE], "lensFlarePS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_DDGI_DEBUG], "ddgi_debugPS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_POSTPROCESS_VOLUMETRICCLOUDS_UPSAMPLE], "volumetricCloud_upsamplePS.cso"); });
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_COPY_DEPTH], "copyDepthPS.cso"); });
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_COPY_STENCIL_BIT], "copyStencilBitPS.cso"); });
 
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_VOXELIZER], "objectGS_voxelizer.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_VOXEL], "voxelGS.cso"); });
@@ -1396,6 +1398,23 @@ void LoadShaders()
 		desc.dss = &depthStencils[DSSTYPE_DEPTHDISABLED];
 
 		device->CreatePipelineState(&desc, &PSO_outline);
+		});
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) {
+		PipelineStateDesc desc;
+
+		desc.vs = &shaders[VSTYPE_SCREEN];
+		desc.ps = &shaders[PSTYPE_COPY_DEPTH];
+		desc.bs = &blendStates[BSTYPE_OPAQUE];
+		desc.rs = &rasterizers[RSTYPE_DOUBLESIDED];
+		desc.dss = &depthStencils[DSSTYPE_WRITEONLY];
+		device->CreatePipelineState(&desc, &PSO_copyDepth);
+
+		desc.ps = &shaders[PSTYPE_COPY_STENCIL_BIT];
+		for (int i = 0; i < 8; ++i)
+		{
+			desc.dss = &depthStencils[DSSTYPE_COPY_STENCIL_BIT_0 + i];
+			device->CreatePipelineState(&desc, &PSO_copyStencilBit[i]);
+		}
 		});
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) {
 		PipelineStateDesc desc;
@@ -2112,6 +2131,19 @@ void SetUpStates()
 	dsd.stencil_enable = false;
 	depthStencils[DSSTYPE_WRITEONLY] = dsd;
 
+	dsd.depth_enable = false;
+	dsd.depth_write_mask = DepthWriteMask::ZERO;
+	dsd.stencil_enable = true;
+	dsd.stencil_read_mask = 0;
+	dsd.front_face.stencil_func = ComparisonFunc::ALWAYS;
+	dsd.front_face.stencil_pass_op = StencilOp::REPLACE;
+	dsd.back_face = dsd.front_face;
+	for (int i = 0; i < 8; ++i)
+	{
+		dsd.stencil_write_mask = uint8_t(1 << i);
+		depthStencils[DSSTYPE_COPY_STENCIL_BIT_0 + i] = dsd;
+	}
+
 
 	BlendState bd;
 	bd.render_target[0].blend_enable = false;
@@ -2403,11 +2435,6 @@ void Initialize()
 void ClearWorld(Scene& scene)
 {
 	scene.Clear();
-
-	deferredMIPGenLock.lock();
-	deferredMIPGens.clear();
-	deferredMIPGenLock.unlock();
-
 }
 
 // Don't store this structure on heap!
@@ -2845,7 +2872,11 @@ void RenderMeshes(
 		}
 
 		const float dither = std::max(instance.GetTransparency(), std::max(0.0f, batch.GetDistance() - instance.fadeDistance) / instance.radius);
-		if (dither > 0)
+		if (dither > 0.99f)
+		{
+			continue;
+		}
+		else if (dither > 0)
 		{
 			instancedBatch.forceAlphatestForDithering = 1;
 		}
@@ -3055,6 +3086,7 @@ void UpdateVisibility(Visibility& vis)
 						XMVECTOR P = XMLoadFloat3(&object.center);
 						XMVECTOR N = XMVectorSet(0, 1, 0, 0);
 						N = XMVector3TransformNormal(N, XMLoadFloat4x4(&vis.scene->matrix_objects[args.jobIndex]));
+						N = XMVector3Normalize(N);
 						XMVECTOR _refPlane = XMPlaneFromPointNormal(P, N);
 						XMStoreFloat4(&vis.reflectionPlane, _refPlane);
 
@@ -4517,7 +4549,7 @@ void UpdateRenderDataAsync(
 			const MeshComponent* mesh = vis.scene->meshes.GetComponent(emitter.meshID);
 			const uint32_t instanceIndex = uint32_t(vis.scene->objects.GetCount() + vis.scene->hairs.GetCount()) + emitterIndex;
 
-			emitter.UpdateGPU(instanceIndex, transform, mesh, cmd);
+			emitter.UpdateGPU(instanceIndex, mesh, cmd);
 		}
 		wi::profiler::EndRange(range);
 	}
@@ -4835,7 +4867,6 @@ void DrawWaterRipples(const Visibility& vis, CommandList cmd)
 
 void DrawSoftParticles(
 	const Visibility& vis,
-	const Texture& lineardepth,
 	bool distortion, 
 	CommandList cmd
 )
@@ -5696,6 +5727,7 @@ void DrawScene(
 	const bool ocean = flags & DRAWSCENE_OCEAN;
 	const bool skip_planar_reflection_objects = flags & DRAWSCENE_SKIP_PLANAR_REFLECTION_OBJECTS;
 	const bool foreground_only = flags & DRAWSCENE_FOREGROUND_ONLY;
+	const bool maincamera = flags & DRAWSCENE_MAINCAMERA;
 
 	device->EventBegin("DrawScene", cmd);
 	device->BindShadingRate(ShadingRate::RATE_1X1, cmd);
@@ -5734,15 +5766,22 @@ void DrawScene(
 			continue;
 
 		const ObjectComponent& object = vis.scene->objects[instanceIndex];
-		if (object.IsRenderable() && object.IsForeground() == foreground_only && (object.GetFilterMask() & filterMask))
-		{
-			const float distance = wi::math::Distance(vis.camera->Eye, object.center);
-			if (distance > object.fadeDistance + object.radius)
-			{
-				continue;
-			}
-			renderQueue.add(object.mesh_index, instanceIndex, distance, object.sort_bits);
-		}
+		if (!object.IsRenderable())
+			continue;
+		if (foreground_only && !object.IsForeground())
+			continue;
+		if (maincamera && object.IsNotVisibleInMainCamera())
+			continue;
+		if (skip_planar_reflection_objects && object.IsNotVisibleInReflections())
+			continue;
+		if ((object.GetFilterMask() & filterMask) == 0)
+			continue;
+
+		const float distance = wi::math::Distance(vis.camera->Eye, object.center);
+		if (distance > object.fadeDistance + object.radius)
+			continue;
+
+		renderQueue.add(object.mesh_index, instanceIndex, distance, object.sort_bits);
 	}
 	if (!renderQueue.empty())
 	{
@@ -6802,14 +6841,9 @@ void DrawDebugWorld(
 		{
 			const wi::EmittedParticleSystem& emitter = scene.emitters[i];
 			Entity entity = scene.emitters.GetEntity(i);
-			if (!scene.transforms.Contains(entity))
-			{
-				continue;
-			}
-			const TransformComponent& transform = *scene.transforms.GetComponent(entity);
 			const MeshComponent* mesh = scene.meshes.GetComponent(emitter.meshID);
 
-			XMStoreFloat4x4(&sb.g_xTransform, XMLoadFloat4x4(&transform.world)*camera.GetViewProjection());
+			XMStoreFloat4x4(&sb.g_xTransform, XMLoadFloat4x4(&emitter.worldMatrix)*camera.GetViewProjection());
 			sb.g_xColor = float4(0, 1, 0, 1);
 
 			device->BindDynamicConstantBuffer(sb, CB_GETBINDSLOT(MiscCB), cmd);
@@ -7665,7 +7699,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 				if ((aabb.layerMask & vis.layerMask) && (aabb.layerMask & probe_aabb.layerMask) && culler.intersects(aabb))
 				{
 					const ObjectComponent& object = vis.scene->objects[i];
-					if (object.IsRenderable())
+					if (object.IsRenderable() && !object.IsNotVisibleInReflections())
 					{
 						uint16_t camera_mask = 0;
 						for (uint32_t camera_index = 0; camera_index < arraysize(cameras); ++camera_index)
@@ -9178,7 +9212,6 @@ void RayTraceScene(
 	const Texture& output,
 	int accumulation_sample, 
 	CommandList cmd,
-	uint8_t instanceInclusionMask,
 	const Texture* output_albedo,
 	const Texture* output_normal,
 	const Texture* output_depth,
@@ -9205,6 +9238,7 @@ void RayTraceScene(
 	cb.xTraceResolution_rcp.x = 1.0f / cb.xTraceResolution.x;
 	cb.xTraceResolution_rcp.y = 1.0f / cb.xTraceResolution.y;
 	cb.xTraceUserData.x = raytraceBounceCount;
+	uint8_t instanceInclusionMask = 0xFF;
 	cb.xTraceUserData.y = instanceInclusionMask;
 	cb.xTraceSampleIndex = (uint32_t)accumulation_sample;
 	device->BindDynamicConstantBuffer(cb, CB_GETBINDSLOT(RaytracingCB), cmd);
@@ -9285,9 +9319,13 @@ void RayTraceScene(
 	barrier_stack.push_back(GPUBarrier::Image(&output, ResourceState::UNORDERED_ACCESS, output.desc.layout));
 	if (output_depth_stencil != nullptr)
 	{
-		barrier_stack.push_back(GPUBarrier::Image(output_depth, ResourceState::UNORDERED_ACCESS, ResourceState::COPY_SRC));
-		barrier_stack.push_back(GPUBarrier::Image(output_stencil, ResourceState::UNORDERED_ACCESS, ResourceState::COPY_SRC));
-		barrier_stack.push_back(GPUBarrier::Image(output_depth_stencil, output_depth_stencil->desc.layout, ResourceState::COPY_DST));
+		CopyDepthStencil(
+			output_depth,
+			output_stencil,
+			*output_depth_stencil,
+			cmd,
+			0xFF
+		);
 	}
 	else
 	{
@@ -9302,31 +9340,6 @@ void RayTraceScene(
 	}
 	barrier_stack_flush(cmd);
 
-	if (output_depth_stencil != nullptr && output_depth != nullptr && output_stencil != nullptr)
-	{
-		// The separate depth, stencil textures will be copied to a real depth-stencil:
-		device->CopyTexture(
-			output_depth_stencil, 0, 0, 0, 0, 0,
-			output_depth, 0, 0,
-			cmd,
-			nullptr,
-			ImageAspect::DEPTH,
-			ImageAspect::COLOR
-		);
-		device->CopyTexture(
-			output_depth_stencil, 0, 0, 0, 0, 0,
-			output_stencil, 0, 0,
-			cmd,
-			nullptr,
-			ImageAspect::STENCIL,
-			ImageAspect::COLOR
-		);
-		barrier_stack.push_back(GPUBarrier::Image(output_depth, ResourceState::COPY_SRC, output_depth->desc.layout));
-		barrier_stack.push_back(GPUBarrier::Image(output_stencil, ResourceState::COPY_SRC, output_stencil->desc.layout));
-		barrier_stack.push_back(GPUBarrier::Image(output_depth_stencil, ResourceState::COPY_DST, output_depth_stencil->desc.layout));
-		barrier_stack_flush(cmd);
-	}
-
 	wi::profiler::EndRange(range);
 	device->EventEnd(cmd); // RayTraceScene
 }
@@ -9338,7 +9351,7 @@ void RayTraceSceneBVH(const Scene& scene, CommandList cmd)
 	device->EventEnd(cmd);
 }
 
-void RefreshLightmaps(const Scene& scene, CommandList cmd, uint8_t instanceInclusionMask)
+void RefreshLightmaps(const Scene& scene, CommandList cmd)
 {
 	const uint32_t lightmap_request_count = scene.lightmap_request_allocator.load();
 	if (lightmap_request_count > 0)
@@ -9416,6 +9429,7 @@ void RefreshLightmaps(const Scene& scene, CommandList cmd, uint8_t instanceInclu
 				cb.xTracePixelOffset.y *= 1.4f;	// boost the jitter by a bit
 				cb.xTraceAccumulationFactor = 1.0f / (object.lightmapIterationCount + 1.0f); // accumulation factor (alpha)
 				cb.xTraceUserData.x = raytraceBounceCount;
+				uint8_t instanceInclusionMask = 0xFF;
 				cb.xTraceUserData.y = instanceInclusionMask;
 				cb.xTraceSampleIndex = object.lightmapIterationCount;
 				device->BindDynamicConstantBuffer(cb, CB_GETBINDSLOT(RaytracingCB), cmd);
@@ -9468,6 +9482,7 @@ void BindCameraCB(
 	shadercam.z_range = abs(shadercam.z_far - shadercam.z_near);
 	shadercam.z_range_rcp = 1.0f / std::max(0.0001f, shadercam.z_range);
 	shadercam.clip_plane = camera.clipPlane;
+	shadercam.reflection_plane = camera_reflection.clipPlaneOriginal;
 
 	static_assert(arraysize(camera.frustum.planes) == arraysize(shadercam.frustum.planes), "Mismatch!");
 	for (int i = 0; i < arraysize(camera.frustum.planes); ++i)
@@ -9483,6 +9498,7 @@ void BindCameraCB(
 	XMStoreFloat4x4(&shadercam.previous_view_projection, camera_previous.GetViewProjection());
 	XMStoreFloat4x4(&shadercam.previous_inverse_view_projection, camera_previous.GetInvViewProjection());
 	XMStoreFloat4x4(&shadercam.reflection_view_projection, camera_reflection.GetViewProjection());
+	XMStoreFloat4x4(&shadercam.reflection_inverse_view_projection, camera_reflection.GetInvViewProjection());
 	XMStoreFloat4x4(&shadercam.reprojection, camera.GetInvViewProjection() * camera_previous.GetViewProjection());
 
 	shadercam.focal_length = camera.focal_length;
@@ -9519,6 +9535,7 @@ void BindCameraCB(
 	shadercam.buffer_entitytiles_opaque_index = camera.buffer_entitytiles_opaque_index;
 	shadercam.buffer_entitytiles_transparent_index = camera.buffer_entitytiles_transparent_index;
 	shadercam.texture_reflection_index = camera.texture_reflection_index;
+	shadercam.texture_reflection_depth_index = camera.texture_reflection_depth_index;
 	shadercam.texture_refraction_index = camera.texture_refraction_index;
 	shadercam.texture_waterriples_index = camera.texture_waterriples_index;
 	shadercam.texture_ao_index = camera.texture_ao_index;
@@ -10197,8 +10214,7 @@ void SurfelGI_Coverage(
 void SurfelGI(
 	const SurfelGIResources& res,
 	const Scene& scene,
-	CommandList cmd,
-	uint8_t instanceInclusionMask
+	CommandList cmd
 )
 {
 	if (!scene.TLAS.IsValid() && !scene.BVH.IsValid())
@@ -10339,6 +10355,7 @@ void SurfelGI(
 		device->BindComputeShader(&shaders[CSTYPE_SURFEL_RAYTRACE], cmd);
 
 		PushConstantsSurfelRaytrace push;
+		uint8_t instanceInclusionMask = 0xFF;
 		push.instanceInclusionMask = instanceInclusionMask;
 		device->PushConstants(&push, sizeof(push), cmd);
 
@@ -10416,8 +10433,7 @@ void SurfelGI(
 
 void DDGI(
 	const wi::scene::Scene& scene,
-	CommandList cmd,
-	uint8_t instanceInclusionMask
+	CommandList cmd
 )
 {
 	if (!scene.TLAS.IsValid() && !scene.BVH.IsValid())
@@ -10432,6 +10448,7 @@ void DDGI(
 	BindCommonResources(cmd);
 
 	DDGIPushConstants push;
+	uint8_t instanceInclusionMask = 0xFF;
 	push.instanceInclusionMask = instanceInclusionMask;
 	push.frameIndex = scene.ddgi.frame_index;
 	push.rayCount = std::min(GetDDGIRayCount(), DDGI_MAX_RAYCOUNT);
@@ -11506,8 +11523,7 @@ void Postprocess_RTAO(
 	const Texture& output,
 	CommandList cmd,
 	float range,
-	float power,
-	uint8_t instanceInclusionMask
+	float power
 )
 {
 	if (!device->CheckCapability(GraphicsDeviceCapability::RAYTRACING))
@@ -11566,6 +11582,7 @@ void Postprocess_RTAO(
 	rtao_range = range;
 	rtao_power = power;
 	postprocess.params0.w = (float)res.frame;
+	uint8_t instanceInclusionMask = 0xFF;
 	std::memcpy(&postprocess.params1.x, &instanceInclusionMask, sizeof(instanceInclusionMask));
 	device->PushConstants(&postprocess, sizeof(postprocess), cmd);
 
@@ -11786,8 +11803,7 @@ void Postprocess_RTDiffuse(
 	const Scene& scene,
 	const Texture& output,
 	CommandList cmd,
-	float range,
-	uint8_t instanceInclusionMask
+	float range
 )
 {
 	if (!device->CheckCapability(GraphicsDeviceCapability::RAYTRACING))
@@ -11811,6 +11827,7 @@ void Postprocess_RTDiffuse(
 	postprocess.resolution_rcp.y = 1.0f / postprocess.resolution.y;
 	rtdiffuse_range = range;
 	rtdiffuse_frame = (float)res.frame;
+	uint8_t instanceInclusionMask = 0xFF;
 	std::memcpy(&postprocess.params1.x, &instanceInclusionMask, sizeof(instanceInclusionMask));
 
 	{
@@ -12078,8 +12095,7 @@ void Postprocess_RTReflection(
 	const Texture& output,
 	CommandList cmd,
 	float range,
-	float roughnessCutoff,
-	uint8_t instanceInclusionMask
+	float roughnessCutoff
 )
 {
 	if (!device->CheckCapability(GraphicsDeviceCapability::RAYTRACING))
@@ -12104,6 +12120,7 @@ void Postprocess_RTReflection(
 	rtreflection_range = range;
 	rtreflection_roughness_cutoff = roughnessCutoff;
 	rtreflection_frame = (float)res.frame;
+	uint8_t instanceInclusionMask = raytracing_inclusion_mask_reflection;
 	std::memcpy(&postprocess.params1.x, &instanceInclusionMask, sizeof(instanceInclusionMask));
 
 	{
@@ -12955,8 +12972,7 @@ void Postprocess_RTShadow(
 	const GPUBuffer& entityTiles_Opaque,
 	const Texture& lineardepth,
 	const Texture& output,
-	CommandList cmd,
-	uint8_t instanceInclusionMask
+	CommandList cmd
 )
 {
 	if (!device->CheckCapability(GraphicsDeviceCapability::RAYTRACING))
@@ -13035,6 +13051,7 @@ void Postprocess_RTShadow(
 	postprocess.resolution_rcp.x = 1.0f / postprocess.resolution.x;
 	postprocess.resolution_rcp.y = 1.0f / postprocess.resolution.y;
 	postprocess.params0.w = (float)res.frame;
+	uint8_t instanceInclusionMask = raytracing_inclusion_mask_shadow;
 	std::memcpy(&postprocess.params1.x, &instanceInclusionMask, sizeof(instanceInclusionMask));
 	device->PushConstants(&postprocess, sizeof(postprocess), cmd);
 
@@ -15952,6 +15969,119 @@ void YUV_to_RGB(
 			GPUBarrier::Image(&output, ResourceState::UNORDERED_ACCESS, output.desc.layout),
 		};
 		device->Barrier(barriers, arraysize(barriers), cmd);
+	}
+
+	device->EventEnd(cmd);
+}
+
+void CopyDepthStencil(
+	const Texture* input_depth,
+	const Texture* input_stencil,
+	const Texture& output_depth_stencil,
+	CommandList cmd,
+	uint8_t stencil_bits_to_copy,
+	bool depthstencil_already_cleared
+)
+{
+	device->EventBegin("CopyDepthStencil", cmd);
+
+	bool manual_depthstencil_copy_required =
+		(stencil_bits_to_copy != 0xFF) ||
+		device->CheckCapability(GraphicsDeviceCapability::COPY_BETWEEN_DIFFERENT_IMAGE_ASPECTS_NOT_SUPPORTED)
+	;
+
+	if (manual_depthstencil_copy_required)
+	{
+		barrier_stack.push_back(GPUBarrier::Image(input_depth, input_depth->desc.layout, ResourceState::SHADER_RESOURCE));
+		barrier_stack.push_back(GPUBarrier::Image(input_stencil, input_stencil->desc.layout, ResourceState::SHADER_RESOURCE));
+		barrier_stack_flush(cmd);
+
+		RenderPassImage rp[] = {
+			RenderPassImage::DepthStencil(
+				&output_depth_stencil,
+				depthstencil_already_cleared ? RenderPassImage::LoadOp::LOAD : RenderPassImage::LoadOp::CLEAR
+			),
+		};
+		device->RenderPassBegin(rp, arraysize(rp), cmd);
+
+		Viewport vp;
+		vp.width = (float)output_depth_stencil.desc.width;
+		vp.height = (float)output_depth_stencil.desc.height;
+		device->BindViewports(1, &vp, cmd);
+
+		Rect rect;
+		rect.left = 0;
+		rect.right = output_depth_stencil.desc.width;
+		rect.top = 0;
+		rect.bottom = output_depth_stencil.desc.height;
+		device->BindScissorRects(1, &rect, cmd);
+
+		if (input_depth != nullptr)
+		{
+			device->EventBegin("CopyDepth", cmd);
+			device->BindPipelineState(&PSO_copyDepth, cmd);
+			device->BindResource(input_depth, 0, cmd);
+			device->Draw(3, 0, cmd);
+			device->EventEnd(cmd);
+			barrier_stack.push_back(GPUBarrier::Image(input_depth, ResourceState::SHADER_RESOURCE, input_depth->desc.layout));
+		}
+
+		if (input_stencil != nullptr)
+		{
+			device->EventBegin("CopyStencilBits", cmd);
+			device->BindResource(input_stencil, 0, cmd);
+
+			uint32_t bit_index = 0;
+			while (stencil_bits_to_copy != 0)
+			{
+				if (stencil_bits_to_copy & 0x1)
+				{
+					device->BindPipelineState(&PSO_copyStencilBit[bit_index], cmd);
+					const uint bit = 1u << bit_index;
+					device->PushConstants(&bit, sizeof(bit), cmd);
+					device->BindStencilRef(bit, cmd);
+					device->Draw(3, 0, cmd);
+				}
+				bit_index++;
+				stencil_bits_to_copy >>= 1;
+			}
+			device->EventEnd(cmd);
+			barrier_stack.push_back(GPUBarrier::Image(input_stencil, ResourceState::SHADER_RESOURCE, input_stencil->desc.layout));
+		}
+
+		device->RenderPassEnd(cmd);
+
+		barrier_stack_flush(cmd);
+
+	}
+	else
+	{
+		barrier_stack.push_back(GPUBarrier::Image(input_depth, input_depth->desc.layout, ResourceState::COPY_SRC));
+		barrier_stack.push_back(GPUBarrier::Image(input_stencil, input_stencil->desc.layout, ResourceState::COPY_SRC));
+		barrier_stack.push_back(GPUBarrier::Image(&output_depth_stencil, output_depth_stencil.desc.layout, ResourceState::COPY_DST));
+		barrier_stack_flush(cmd);
+
+		device->CopyTexture(
+			&output_depth_stencil, 0, 0, 0, 0, 0,
+			input_depth, 0, 0,
+			cmd,
+			nullptr,
+			ImageAspect::DEPTH,
+			ImageAspect::COLOR
+		);
+		device->CopyTexture(
+			&output_depth_stencil, 0, 0, 0, 0, 0,
+			input_stencil, 0, 0,
+			cmd,
+			nullptr,
+			ImageAspect::STENCIL,
+			ImageAspect::COLOR
+		);
+
+		barrier_stack.push_back(GPUBarrier::Image(input_depth, ResourceState::COPY_SRC, input_depth->desc.layout));
+		barrier_stack.push_back(GPUBarrier::Image(input_stencil, ResourceState::COPY_SRC, input_stencil->desc.layout));
+		barrier_stack.push_back(GPUBarrier::Image(&output_depth_stencil, ResourceState::COPY_DST, output_depth_stencil.desc.layout));
+		barrier_stack_flush(cmd);
 	}
 
 	device->EventEnd(cmd);

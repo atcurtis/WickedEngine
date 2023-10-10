@@ -25,6 +25,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 	rng.init(uint2(xEmitterRandomness, DTid.x), GetFrame().frame_count);
 
 	const float4x4 worldMatrix = xEmitterTransform.GetMatrix();
+	float3 emitPos = 0;
 		
 #ifdef EMIT_FROM_MESH
 	// random triangle on emitter surface:
@@ -57,24 +58,25 @@ void main(uint3 DTid : SV_DispatchThreadID)
 	float2 bary = float2(f, g);
 
 	// compute final surface position on triangle from barycentric coords:
-	float3 pos = attribute_at_bary(pos_nor0.xyz, pos_nor1.xyz, pos_nor2.xyz, bary);
+	emitPos = attribute_at_bary(pos_nor0.xyz, pos_nor1.xyz, pos_nor2.xyz, bary);
 	float3 nor = normalize(attribute_at_bary(nor0, nor1, nor2, bary));
-	pos = mul(worldMatrix, float4(pos, 1)).xyz;
 	nor = normalize(mul((float3x3)worldMatrix, nor));
 
 #else
 
 #ifdef EMITTER_VOLUME
 	// Emit inside volume:
-	float3 pos = mul(worldMatrix, float4(rng.next_float() * 2 - 1, rng.next_float() * 2 - 1, rng.next_float() * 2 - 1, 1)).xyz;
+	emitPos = float3(rng.next_float() * 2 - 1, rng.next_float() * 2 - 1, rng.next_float() * 2 - 1);
 #else
 	// Just emit from center point:
-	float3 pos = mul(worldMatrix, float4(0, 0, 0, 1)).xyz;
+	emitPos = 0;
 #endif // EMITTER_VOLUME
 
 	float3 nor = 0;
 
 #endif // EMIT_FROM_MESH
+
+	float3 pos = mul(worldMatrix, float4(emitPos, 1)).xyz;
 
 	float particleStartingSize = xParticleSize + xParticleSize * (rng.next_float() - 0.5f) * xParticleRandomFactor;
 
