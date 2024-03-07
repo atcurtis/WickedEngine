@@ -76,6 +76,7 @@ inline ShaderMaterial GetMaterial()
 //#define OBJECTSHADER_USE_UVSETS					- shader will sample textures with uv sets
 //#define OBJECTSHADER_USE_ATLAS					- shader will use atlas
 //#define OBJECTSHADER_USE_NORMAL					- shader will use normals
+//#define OBJECTSHADER_USE_AO						- shader will use ambient occlusion
 //#define OBJECTSHADER_USE_TANGENT					- shader will use tangents, normal mapping
 //#define OBJECTSHADER_USE_POSITION3D				- shader will use world space positions
 //#define OBJECTSHADER_USE_EMISSIVE					- shader will use emissive
@@ -110,6 +111,7 @@ inline ShaderMaterial GetMaterial()
 #define OBJECTSHADER_USE_ATLAS
 #define OBJECTSHADER_USE_COLOR
 #define OBJECTSHADER_USE_NORMAL
+#define OBJECTSHADER_USE_AO
 #define OBJECTSHADER_USE_TANGENT
 #define OBJECTSHADER_USE_POSITION3D
 #define OBJECTSHADER_USE_EMISSIVE
@@ -121,17 +123,17 @@ struct VertexInput
 	uint vertexID : SV_VertexID;
 	uint instanceID : SV_InstanceID;
 
-	float4 GetPositionNormalWind()
+	float4 GetPositionWind()
 	{
-		return bindless_buffers_float4[GetMesh().vb_pos_nor_wind][vertexID];
+		return bindless_buffers_float4[GetMesh().vb_pos_wind][vertexID];
 	}
 
-	min16float4 GetUVSets()
+	float4 GetUVSets()
 	{
 		[branch]
 		if (GetMesh().vb_uvs < 0)
 			return 0;
-		return (min16float4)bindless_buffers_float4[GetMesh().vb_uvs][vertexID];
+		return lerp(GetMesh().uv_range_min.xyxy, GetMesh().uv_range_max.xyxy, bindless_buffers_float4[GetMesh().vb_uvs][vertexID]);
 	}
 
 	ShaderMeshInstancePointer GetInstancePointer()
@@ -159,6 +161,14 @@ struct VertexInput
 			return 1;
 		return (min16float4)bindless_buffers_float4[GetMesh().vb_col][vertexID];
 	}
+	
+	float3 GetNormal()
+	{
+		[branch]
+		if (GetMesh().vb_nor < 0)
+			return 0;
+		return bindless_buffers_float4[GetMesh().vb_nor][vertexID].xyz;
+	}
 
 	min16float4 GetTangent()
 	{
@@ -177,6 +187,14 @@ struct VertexInput
 		inst.init();
 		return inst;
 	}
+
+	min16float GetVertexAO()
+	{
+		[branch]
+		if (GetInstance().vb_ao < 0)
+			return 1;
+		return (min16float)bindless_buffers_float[GetInstance().vb_ao][vertexID];
+	}
 };
 
 
@@ -186,15 +204,15 @@ struct VertexSurface
 	float4 uvsets;
 	min16float2 atlas;
 	min16float4 color;
-	min16float3 normal;
+	float3 normal;
 	min16float4 tangent;
+	min16float ao;
 
 	inline void create(in ShaderMaterial material, in VertexInput input)
 	{
-		float4 pos_nor_wind = input.GetPositionNormalWind();
-		uint normal_wind = asuint(pos_nor_wind.w);
-		position = float4(pos_nor_wind.xyz, 1);
-		normal = min16float3(unpack_unitvector(normal_wind));
+		float4 pos_wind = input.GetPositionWind();
+		position = float4(pos_wind.xyz, 1);
+		normal = input.GetNormal();
 		color = min16float4(GetMaterial().baseColor * unpack_rgba(input.GetInstance().color));
 		color.a *= min16float(1 - input.GetInstancePointer().GetDither());
 
@@ -203,12 +221,26 @@ struct VertexSurface
 		{
 			color *= input.GetVertexColor();
 		}
-		
-		normal = mul((min16float3x3)input.GetInstance().transformInverseTranspose.GetMatrix(), normal);
+
+		[branch]
+		if (material.IsUsingVertexAO())
+		{
+			ao = input.GetVertexAO();
+		}
+		else
+		{
+			ao = 1;
+		}
+
+		normal = mul((float3x3)input.GetInstance().transformInverseTranspose.GetMatrix(), normal);
 
 		tangent = input.GetTangent();
 		tangent.xyz = mul((min16float3x3)input.GetInstance().transformInverseTranspose.GetMatrix(), tangent.xyz);
 
+		// Note: normalization must happen when normal is exported as half precision for interpolator!
+		normal = any(normal) ? normalize(normal) : 0;
+		tangent = any(tangent) ? normalize(tangent) : 0;
+		
 		uvsets = input.GetUVSets();
 
 		atlas = input.GetAtlasUV();
@@ -219,7 +251,7 @@ struct VertexSurface
 		[branch]
 		if (material.IsUsingWind())
 		{
-			position.xyz += compute_wind(position.xyz, ((normal_wind >> 24u) & 0xFF) / 255.0);
+			position.xyz += sample_wind(position.xyz, pos_wind.w);
 		}
 #endif // DISABLE_WIND
 	}
@@ -250,7 +282,7 @@ struct PixelInput
 #endif // OBJECTSHADER_USE_TANGENT
 
 #ifdef OBJECTSHADER_USE_NORMAL
-	min16float3 nor : NORMAL;
+	float3 nor : NORMAL;
 #endif // OBJECTSHADER_USE_NORMAL
 
 #ifdef OBJECTSHADER_USE_ATLAS
@@ -260,6 +292,10 @@ struct PixelInput
 #ifdef OBJECTSHADER_USE_POSITION3D
 	float3 pos3D : WORLDPOSITION;
 #endif // OBJECTSHADER_USE_POSITION3D
+
+#ifdef OBJECTSHADER_USE_AO
+	min16float ao : AMBIENT_OCCLUSION;
+#endif // OBJECTSHADER_USE_AO
 
 #ifdef OBJECTSHADER_USE_RENDERTARGETARRAYINDEX
 #ifdef VPRT_EMULATION
@@ -355,6 +391,10 @@ PixelInput main(VertexInput input)
 	Out.nor = surface.normal;
 #endif // OBJECTSHADER_USE_NORMAL
 
+#ifdef OBJECTSHADER_USE_AO
+	Out.ao = surface.ao;
+#endif // OBJECTSHADER_USE_AO
+
 #ifdef OBJECTSHADER_USE_TANGENT
 	Out.tan = surface.tangent;
 #endif // OBJECTSHADER_USE_TANGENT
@@ -385,13 +425,15 @@ PixelInput main(VertexInput input)
 
 // Possible switches:
 //	PREPASS				-	assemble object shader for depth prepass rendering
-//	TRANSPARENT			-	assemble object shader for forward or tile forward transparent rendering
+//	DEPTHONLY			-	assemble object shader for depth prepass rendering with no return
+//	TRANSPARENT			-	assemble object shader for tiled forward transparent rendering
 //	ENVMAPRENDERING		-	modify object shader for envmap rendering
 //	PLANARREFLECTION	-	include planar reflection sampling
 //	PARALLAXOCCLUSIONMAPPING					-	include parallax occlusion mapping computation
 //	WATER				-	include specialized water shader code
+//  ... and other material type specific defines
 
-#if defined(__PSSL__) && defined(PREPASS)
+#if defined(__PSSL__) && defined(PREPASS) && !defined(DEPTHONLY)
 #pragma PSSL_target_output_format (target 0 FMT_32_R)
 #endif // __PSSL__ && PREPASS
 
@@ -401,7 +443,11 @@ PixelInput main(VertexInput input)
 
 // entry point:
 #ifdef PREPASS
+#ifdef DEPTHONLY
+void main(PixelInput input, in uint primitiveID : SV_PrimitiveID, out uint coverage : SV_Coverage)
+#else
 uint main(PixelInput input, in uint primitiveID : SV_PrimitiveID, out uint coverage : SV_Coverage) : SV_Target
+#endif // DEPTHONLY
 #else
 float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace) : SV_Target
 #endif // PREPASS
@@ -411,8 +457,8 @@ float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace) : SV_Target
 {
 	const float depth = input.pos.z;
 	const float lineardepth = input.pos.w;
-	const uint2 pixel = input.pos.xy;
-	const float2 ScreenCoord = pixel * GetCamera().internal_resolution_rcp;
+	const uint2 pixel = input.pos.xy; // no longer pixel center!
+	const float2 ScreenCoord = input.pos.xy * GetCamera().internal_resolution_rcp; // use pixel center!
 
 #ifdef OBJECTSHADER_USE_UVSETS
 	float4 uvsets = input.GetUVSets();
@@ -445,6 +491,10 @@ float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace) : SV_Target
 	}
 	surface.N = normalize(input.nor);
 #endif // OBJECTSHADER_USE_NORMAL
+
+#ifdef OBJECTSHADER_USE_AO
+	surface.occlusion = input.ao;
+#endif // OBJECTSHADER_USE_AO
 
 #ifdef OBJECTSHADER_USE_POSITION3D
 	surface.P = input.pos3D;
@@ -502,6 +552,12 @@ float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace) : SV_Target
 #endif // PREPASS
 	{
 		surface.baseColor *= GetMaterial().textures[BASECOLORMAP].Sample(sampler_objectshader, uvsets);
+	}
+	
+	[branch]
+	if (GetMaterial().textures[TRANSPARENCYMAP].IsValid())
+	{
+		surface.baseColor.a *= GetMaterial().textures[TRANSPARENCYMAP].Sample(sampler_objectshader, uvsets).r;
 	}
 #endif // OBJECTSHADER_USE_UVSETS
 
@@ -905,12 +961,13 @@ float4 main(PixelInput input, in bool is_frontface : SV_IsFrontFace) : SV_Target
 	// end point:
 #ifdef PREPASS
 	coverage = AlphaToCoverage(color.a, GetMaterial().alphaTest, input.pos);
-
+#ifndef DEPTHONLY
 	PrimitiveID prim;
 	prim.primitiveIndex = primitiveID;
 	prim.instanceIndex = input.GetInstanceIndex();
 	prim.subsetIndex = push.geometryIndex - meshinstance.geometryOffset;
 	return prim.pack();
+#endif // DEPTHONLY
 #else
 	return color;
 #endif // PREPASS

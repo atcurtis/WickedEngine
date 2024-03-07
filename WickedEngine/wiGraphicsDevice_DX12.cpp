@@ -1454,6 +1454,7 @@ namespace dx12_internal
 				CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS Formats;
 				CD3DX12_PIPELINE_STATE_STREAM_SAMPLE_DESC SampleDesc;
 				CD3DX12_PIPELINE_STATE_STREAM_SAMPLE_MASK SampleMask;
+				CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE ROOTSIG;
 			} stream1 = {};
 
 			struct PSO_STREAM2
@@ -1614,6 +1615,10 @@ using namespace dx12_internal;
 	void GraphicsDevice_DX12::CopyAllocator::init(GraphicsDevice_DX12* device)
 	{
 		this->device = device;
+#ifdef PLATFORM_XBOX
+		queue = device->queues[QUEUE_COPY].queue;
+#else
+		// On PC we can create secondary copy queue for background uploading tasks:
 		D3D12_COMMAND_QUEUE_DESC desc = {};
 		desc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
 		desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
@@ -1630,6 +1635,7 @@ using namespace dx12_internal;
 		}
 		hr = queue->SetName(L"CopyAllocator");
 		assert(SUCCEEDED(hr));
+#endif // PLATFORM_XBOX
 	}
 	GraphicsDevice_DX12::CopyAllocator::CopyCMD GraphicsDevice_DX12::CopyAllocator::allocate(uint64_t staging_size)
 	{
@@ -2519,7 +2525,6 @@ using namespace dx12_internal;
 				wi::platform::Exit();
 			}
 		}
-
 
 		if (SUCCEEDED(device.As(&video_device)))
 		{
@@ -3674,6 +3679,15 @@ using namespace dx12_internal;
 		}
 		else
 		{
+			if (has_flag(texture->desc.misc_flags, ResourceMiscFlag::SHARED))
+			{
+				// Dedicated memory
+				allocationDesc.Flags = D3D12MA::ALLOCATION_FLAG_COMMITTED;
+
+				// What about D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER and D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER?
+				allocationDesc.ExtraHeapFlags |= D3D12_HEAP_FLAG_SHARED;
+			}
+
 			hr = allocationhandler->allocator->CreateResource(
 				&allocationDesc,
 				&resourcedesc,
@@ -3694,6 +3708,17 @@ using namespace dx12_internal;
 		{
 			D3D12_RANGE read_range = {};
 			hr = internal_state->resource->Map(0, &read_range, &texture->mapped_data);
+			assert(SUCCEEDED(hr));
+		}
+		else if (has_flag(texture->desc.misc_flags, ResourceMiscFlag::SHARED))
+		{
+			hr = allocationhandler->device->CreateSharedHandle(
+				internal_state->resource.Get(),
+				nullptr,
+				GENERIC_ALL,
+				nullptr,
+				&texture->shared_handle);
+
 			assert(SUCCEEDED(hr));
 		}
 
@@ -3850,9 +3875,11 @@ using namespace dx12_internal;
 			struct PSO_STREAM
 			{
 				CD3DX12_PIPELINE_STATE_STREAM_CS CS;
+				CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE ROOTSIG;
 			} stream;
 
 			stream.CS = { internal_state->shadercode.data(), internal_state->shadercode.size() };
+			stream.ROOTSIG = internal_state->rootSignature.Get();
 
 			D3D12_PIPELINE_STATE_STREAM_DESC streamDesc = {};
 			streamDesc.pPipelineStateSubobjectStream = &stream;
@@ -3969,6 +3996,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 		if (pso->desc.hs != nullptr)
@@ -3979,6 +4007,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 		if (pso->desc.ds != nullptr)
@@ -3989,6 +4018,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 		if (pso->desc.gs != nullptr)
@@ -3999,6 +4029,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 		if (pso->desc.ps != nullptr)
@@ -4009,6 +4040,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 
@@ -4020,6 +4052,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 		if (pso->desc.as != nullptr)
@@ -4030,6 +4063,7 @@ using namespace dx12_internal;
 			{
 				internal_state->rootSignature = shader_internal->rootSignature;
 				internal_state->rootsig_desc = shader_internal->rootsig_desc;
+				stream.stream1.ROOTSIG = internal_state->rootSignature.Get();
 			}
 		}
 
@@ -4453,9 +4487,7 @@ using namespace dx12_internal;
 		switch (desc->profile)
 		{
 		case VideoProfile::H264:
-#ifndef PLATFORM_XBOX
-			decoder_desc.Configuration.DecodeProfile = D3D12_VIDEO_DECODE_PROFILE_H264; // TODO
-#endif // PLATFORM_XBOX
+			decoder_desc.Configuration.DecodeProfile = D3D12_VIDEO_DECODE_PROFILE_H264;
 			decoder_desc.Configuration.InterlaceType = D3D12_VIDEO_FRAME_CODED_INTERLACE_TYPE_NONE;
 			break;
 		//case VideoProfile::H265:
@@ -5312,6 +5344,8 @@ using namespace dx12_internal;
 			for (int q = 0; q < QUEUE_COUNT; ++q)
 			{
 				CommandQueue& queue = queues[q];
+				if (queue.queue == nullptr)
+					continue;
 
 				if (!queue.submit_cmds.empty())
 				{
@@ -5380,6 +5414,8 @@ using namespace dx12_internal;
 		const uint32_t bufferindex = GetBufferIndex();
 		for (int queue = 0; queue < QUEUE_COUNT; ++queue)
 		{
+			if (queues[queue].queue == nullptr)
+				continue;
 			if (FRAMECOUNT >= BUFFERCOUNT && frame_fence[bufferindex][queue]->GetCompletedValue() < 1)
 			{
 				// NULL event handle will simply wait immediately:
@@ -5630,6 +5666,8 @@ using namespace dx12_internal;
 
 		for (auto& queue : queues)
 		{
+			if (queue.queue == nullptr)
+				continue;
 			hr = queue.queue->Signal(fence.Get(), 1);
 			assert(SUCCEEDED(hr));
 			if (fence->GetCompletedValue() < 1)
@@ -7624,13 +7662,13 @@ using namespace dx12_internal;
 		HRESULT hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, PPV_ARGS(fence));
 		assert(SUCCEEDED(hr));
 
-		//D3D12_RESOURCE_BARRIER bar = {};
-		//bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-		//bar.Transition.pResource = dpb_internal->resource.Get();
-		//bar.Transition.StateBefore = D3D12_RESOURCE_STATE_VIDEO_DECODE_WRITE;
-		//bar.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-		//bar.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-		//commandlist.GetVideoDecodeCommandList()->ResourceBarrier(1, &bar);
+		D3D12_RESOURCE_BARRIER bar = {};
+		bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		bar.Transition.pResource = dpb_internal->resource.Get();
+		bar.Transition.StateBefore = D3D12_RESOURCE_STATE_VIDEO_DECODE_WRITE;
+		bar.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+		bar.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		commandlist.GetVideoDecodeCommandList()->ResourceBarrier(1, &bar);
 
 		hr = commandlist.GetVideoDecodeCommandList()->Close();
 		assert(SUCCEEDED(hr));
@@ -7654,7 +7692,7 @@ using namespace dx12_internal;
 
 		hr = commandlist.GetCommandAllocator()->Reset();
 		assert(SUCCEEDED(hr));
-		hr = commandlist.GetGraphicsCommandList()->Reset(commandlist.GetCommandAllocator(), nullptr);
+		hr = commandlist.GetVideoDecodeCommandList()->Reset(commandlist.GetCommandAllocator());
 		assert(SUCCEEDED(hr));
 #endif
 	}

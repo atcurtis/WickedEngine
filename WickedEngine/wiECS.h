@@ -4,6 +4,7 @@
 #include "wiArchive.h"
 #include "wiJobSystem.h"
 #include "wiUnorderedMap.h"
+#include "wiUnorderedSet.h"
 #include "wiVector.h"
 
 #include <cstdint>
@@ -20,7 +21,7 @@ namespace wi::ecs
 	//	The entity can be a different value on a different run of the application, if it was serialized
 	//	It must be only serialized with the SerializeEntity() function. It will ensure that entities still match with their components correctly after serialization
 	using Entity = uint32_t;
-	static const Entity INVALID_ENTITY = 0;
+	inline constexpr Entity INVALID_ENTITY = 0;
 	// Runtime can create a new entity with this
 	inline Entity CreateEntity()
 	{
@@ -28,12 +29,15 @@ namespace wi::ecs
 		return next.fetch_add(1);
 	}
 
+	class ComponentLibrary;
 	struct EntitySerializer
 	{
 		wi::jobsystem::context ctx; // allow components to spawn serialization subtasks
 		wi::unordered_map<uint64_t, Entity> remap;
 		bool allow_remap = true;
 		uint64_t version = 0; // The ComponentLibrary serialization will modify this by the registered component's version number
+		wi::unordered_set<std::string> resource_registration; // register for resource manager serialization
+		ComponentLibrary* componentlibrary = nullptr;
 
 		~EntitySerializer()
 		{
@@ -45,6 +49,13 @@ namespace wi::ecs
 		uint64_t GetVersion() const
 		{
 			return version;
+		}
+
+		void RegisterResource(const std::string& resource_name)
+		{
+			if (resource_name.empty())
+				return;
+			resource_registration.insert(resource_name);
 		}
 	};
 	// This is the safe way to serialize an entity
@@ -89,7 +100,7 @@ namespace wi::ecs
 		}
 	}
 
-	// This is an interface class to implement a ComponentManager, 
+	// This is an interface class to implement a ComponentManager,
 	// inherit this class if you want to work with ComponentLibrary
 	class ComponentManager_Interface
 	{
@@ -143,7 +154,7 @@ namespace wi::ecs
 			lookup = other.lookup;
 		}
 
-		// Merge in an other component manager of the same type to this. 
+		// Merge in an other component manager of the same type to this.
 		//	The other component manager MUST NOT contain any of the same entities!
 		//	The other component manager is not retained after this operation!
 		inline void Merge(ComponentManager<Component>& other)
@@ -390,7 +401,7 @@ namespace wi::ecs
 		}
 
 		// Retrieve component index by entity handle (if not exists, returns ~0ull value)
-		inline size_t GetIndex(Entity entity) const 
+		inline size_t GetIndex(Entity entity) const
 		{
 			if (lookup.empty())
 				return ~0ull;
@@ -461,6 +472,7 @@ namespace wi::ecs
 		// Serialize all registered component managers
 		inline void Serialize(wi::Archive& archive, EntitySerializer& seri)
 		{
+			seri.componentlibrary = this;
 			if(archive.IsReadMode())
 			{
 				bool has_next = false;
@@ -507,6 +519,7 @@ namespace wi::ecs
 		// Serialize all components for one entity
 		inline void Entity_Serialize(Entity entity, wi::Archive& archive, EntitySerializer& seri)
 		{
+			seri.componentlibrary = this;
 			if(archive.IsReadMode())
 			{
 				bool has_next = false;

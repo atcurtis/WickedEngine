@@ -331,7 +331,7 @@ struct Surface
 			return false;
 
 		geometry = load_geometry(inst.geometryOffset + prim.subsetIndex);
-		if (geometry.vb_pos_nor_wind < 0)
+		if (geometry.vb_pos_wind < 0)
 			return false;
 
 		material = load_material(geometry.materialIndex);
@@ -345,7 +345,7 @@ struct Surface
 		i1 = indexBuffer[startIndex + 1];
 		i2 = indexBuffer[startIndex + 2];
 
-		Buffer<float4> buf = bindless_buffers_float4[NonUniformResourceIndex(geometry.vb_pos_nor_wind)];
+		Buffer<float4> buf = bindless_buffers_float4[NonUniformResourceIndex(geometry.vb_pos_wind)];
 		data0 = buf[i0];
 		data1 = buf[i1];
 		data2 = buf[i2];
@@ -360,13 +360,19 @@ struct Surface
 		const bool is_emittedparticle = geometry.flags & SHADERMESH_FLAG_EMITTEDPARTICLE;
 		const bool simple_lighting = is_hairparticle || is_emittedparticle;
 		const bool is_backface = flags & SURFACE_FLAG_BACKFACE;
-
-		float3 n0 = unpack_unitvector(asuint(data0.w));
-		float3 n1 = unpack_unitvector(asuint(data1.w));
-		float3 n2 = unpack_unitvector(asuint(data2.w));
-		N = attribute_at_bary(n0, n1, n2, bary);
-		N = mul((float3x3)inst.transformInverseTranspose.GetMatrix(), N);
-		N = normalize(N);
+		
+		[branch]
+		if (geometry.vb_nor >= 0)
+		{
+			Buffer<float4> buf = bindless_buffers_float4[NonUniformResourceIndex(geometry.vb_nor)];
+			float3 n0 = buf[i0].xyz;
+			float3 n1 = buf[i1].xyz;
+			float3 n2 = buf[i2].xyz;
+			N = attribute_at_bary(n0, n1, n2, bary);
+			N = mul((float3x3)inst.transformInverseTranspose.GetMatrix(), N);
+			N = normalize(N);
+		}
+		
 		if (is_backface && !is_hairparticle && !is_emittedparticle)
 		{
 			N = -N;
@@ -396,9 +402,9 @@ struct Surface
 		if (geometry.vb_uvs >= 0)
 		{
 			Buffer<float4> buf = bindless_buffers_float4[NonUniformResourceIndex(geometry.vb_uvs)];
-			float4 uv0 = buf[i0];
-			float4 uv1 = buf[i1];
-			float4 uv2 = buf[i2];
+			float4 uv0 = lerp(geometry.uv_range_min.xyxy, geometry.uv_range_max.xyxy, buf[i0]);
+			float4 uv1 = lerp(geometry.uv_range_min.xyxy, geometry.uv_range_max.xyxy, buf[i1]);
+			float4 uv2 = lerp(geometry.uv_range_min.xyxy, geometry.uv_range_max.xyxy, buf[i2]);
 			// all three must be transformed, to have correct derivatives (not enough to only transform final uvsets):
 			uv0.xy = mad(uv0.xy, material.texMulAdd.xy, material.texMulAdd.zw);
 			uv1.xy = mad(uv1.xy, material.texMulAdd.xy, material.texMulAdd.zw);
@@ -522,6 +528,20 @@ struct Surface
 				baseColor.a *= baseColorMap.a;
 			}
 		}
+		
+		[branch]
+		if (material.textures[TRANSPARENCYMAP].IsValid())
+		{
+#ifdef SURFACE_LOAD_QUAD_DERIVATIVES
+			baseColor.a *= material.textures[TRANSPARENCYMAP].SampleGrad(sam, uvsets, uvsets_dx, uvsets_dy).r;
+#else
+			float lod = 0;
+#ifdef SURFACE_LOAD_MIPCONE
+			lod = compute_texture_lod(material.textures[TRANSPARENCYMAP].GetTexture(), material.textures[TRANSPARENCYMAP].GetUVSet() == 0 ? lod_constant0 : lod_constant1, ray_direction, surf_normal, cone_width);
+#endif // SURFACE_LOAD_MIPCONE
+			baseColor.a *= material.textures[TRANSPARENCYMAP].SampleLevel(sam, uvsets, lod).r;
+#endif // SURFACE_LOAD_QUAD_DERIVATIVES
+		}
 
 		[branch]
 		if (geometry.vb_col >= 0 && material.IsUsingVertexColors())
@@ -532,6 +552,17 @@ struct Surface
 			const float4 c2 = buf[i2];
 			float4 vertexColor = attribute_at_bary(c0, c1, c2, bary);
 			baseColor *= vertexColor;
+		}
+
+		[branch]
+		if (inst.vb_ao >= 0 && material.IsUsingVertexAO())
+		{
+			Buffer<float> buf = bindless_buffers_float[NonUniformResourceIndex(inst.vb_ao)];
+			const float ao0 = buf[i0];
+			const float ao1 = buf[i1];
+			const float ao2 = buf[i2];
+			float ao = attribute_at_bary(ao0, ao1, ao2, bary);
+			occlusion = ao;
 		}
 
 		[branch]
@@ -606,7 +637,7 @@ struct Surface
 #endif // ENTITY_TILE_UNIFORM
 
 				[loop]
-				while (bucket_bits != 0 && decalAccumulation.a < 1 && decalBumpAccumulation.a < 1 && decalSurfaceAccumulationAlpha < 1)
+				while (bucket_bits != 0)
 				{
 					// Retrieve global entity index from local bucket, then remove bit from local bucket:
 					const uint bucket_bit_index = firstbitlow(bucket_bits);
@@ -626,47 +657,53 @@ struct Surface
 						float decalNormalStrength = decalProjection[3][2];
 						int decalSurfacemap = asint(decalProjection[3][3]);
 						decalProjection[3] = float4(0, 0, 0, 1);
-						const float3 clipSpacePos = mul(decalProjection, float4(P, 1)).xyz;
-						float3 uvw = clipspace_to_uv(clipSpacePos.xyz);
+						
+						// under here will be VGPR!
 						[branch]
-						if (is_saturated(uvw))
+						if(decalAccumulation.a < 1 && decalBumpAccumulation.a < 1 && decalSurfaceAccumulationAlpha < 1)
 						{
-							uvw.xy = mad(uvw.xy, decal.shadowAtlasMulAdd.xy, decal.shadowAtlasMulAdd.zw);
-							// mipmapping needs to be performed by hand:
-							const float2 decalDX = mul(P_dx, (float3x3)decalProjection).xy;
-							const float2 decalDY = mul(P_dy, (float3x3)decalProjection).xy;
-							float4 decalColor = decal.GetColor();
-							// blend out if close to cube Z:
-							const float edgeBlend = 1 - pow(saturate(abs(clipSpacePos.z)), 8);
-							const float slopeBlend = decal.GetConeAngleCos() > 0 ? pow(saturate(dot(N, decal.GetDirection())), decal.GetConeAngleCos()) : 1;
-							decalColor.a *= edgeBlend * slopeBlend;
+							const float3 clipSpacePos = mul(decalProjection, float4(P, 1)).xyz;
+							float3 uvw = clipspace_to_uv(clipSpacePos.xyz);
 							[branch]
-							if (decalTexture >= 0)
+							if (is_saturated(uvw))
 							{
-								decalColor *= bindless_textures[NonUniformResourceIndex(decalTexture)].SampleGrad(sam, uvw.xy, decalDX, decalDY);
-								if ((decal.GetFlags() & ENTITY_FLAG_DECAL_BASECOLOR_ONLY_ALPHA) == 0)
+								uvw.xy = mad(uvw.xy, decal.shadowAtlasMulAdd.xy, decal.shadowAtlasMulAdd.zw);
+								// mipmapping needs to be performed by hand:
+								const float2 decalDX = mul(P_dx, (float3x3)decalProjection).xy;
+								const float2 decalDY = mul(P_dy, (float3x3)decalProjection).xy;
+								float4 decalColor = decal.GetColor();
+								// blend out if close to cube Z:
+								const float edgeBlend = 1 - pow(saturate(abs(clipSpacePos.z)), 8);
+								const float slopeBlend = decal.GetConeAngleCos() > 0 ? pow(saturate(dot(N, decal.GetDirection())), decal.GetConeAngleCos()) : 1;
+								decalColor.a *= edgeBlend * slopeBlend;
+								[branch]
+								if (decalTexture >= 0)
 								{
-									// perform manual blending of decals:
-									//  NOTE: they are sorted top-to-bottom, but blending is performed bottom-to-top
-									decalAccumulation.rgb = mad(1 - decalAccumulation.a, decalColor.a * decalColor.rgb, decalAccumulation.rgb);
-									decalAccumulation.a = mad(1 - decalColor.a, decalAccumulation.a, decalColor.a);
+									decalColor *= bindless_textures[decalTexture].SampleGrad(sam, uvw.xy, decalDX, decalDY);
+									if ((decal.GetFlags() & ENTITY_FLAG_DECAL_BASECOLOR_ONLY_ALPHA) == 0)
+									{
+										// perform manual blending of decals:
+										//  NOTE: they are sorted top-to-bottom, but blending is performed bottom-to-top
+										decalAccumulation.rgb = mad(1 - decalAccumulation.a, decalColor.a * decalColor.rgb, decalAccumulation.rgb);
+										decalAccumulation.a = mad(1 - decalColor.a, decalAccumulation.a, decalColor.a);
+									}
 								}
-							}
-							[branch]
-							if (decalNormal >= 0)
-							{
-								float3 decalBumpColor = float3(bindless_textures[NonUniformResourceIndex(decalNormal)].SampleGrad(sam, uvw.xy, decalDX, decalDY).rg, 1);
-								decalBumpColor = decalBumpColor * 2 - 1;
-								decalBumpColor.rg *= decalNormalStrength;
-								decalBumpAccumulation.rgb = mad(1 - decalBumpAccumulation.a, decalColor.a * decalBumpColor.rgb, decalBumpAccumulation.rgb);
-								decalBumpAccumulation.a = mad(1 - decalColor.a, decalBumpAccumulation.a, decalColor.a);
-							}
-							[branch]
-							if (decalSurfacemap >= 0)
-							{
-								float4 decalSurfaceColor = bindless_textures[NonUniformResourceIndex(decalSurfacemap)].SampleGrad(sam, uvw.xy, decalDX, decalDY);
-								decalSurfaceAccumulation = mad(1 - decalSurfaceAccumulationAlpha, decalColor.a * decalSurfaceColor, decalSurfaceAccumulation);
-								decalSurfaceAccumulationAlpha = mad(1 - decalColor.a, decalSurfaceAccumulationAlpha, decalColor.a);
+								[branch]
+								if (decalNormal >= 0)
+								{
+									float3 decalBumpColor = float3(bindless_textures[decalNormal].SampleGrad(sam, uvw.xy, decalDX, decalDY).rg, 1);
+									decalBumpColor = decalBumpColor * 2 - 1;
+									decalBumpColor.rg *= decalNormalStrength;
+									decalBumpAccumulation.rgb = mad(1 - decalBumpAccumulation.a, decalColor.a * decalBumpColor.rgb, decalBumpAccumulation.rgb);
+									decalBumpAccumulation.a = mad(1 - decalColor.a, decalBumpAccumulation.a, decalColor.a);
+								}
+								[branch]
+								if (decalSurfacemap >= 0)
+								{
+									float4 decalSurfaceColor = bindless_textures[decalSurfacemap].SampleGrad(sam, uvw.xy, decalDX, decalDY);
+									decalSurfaceAccumulation = mad(1 - decalSurfaceAccumulationAlpha, decalColor.a * decalSurfaceColor, decalSurfaceAccumulation);
+									decalSurfaceAccumulationAlpha = mad(1 - decalColor.a, decalSurfaceAccumulationAlpha, decalColor.a);
+								}
 							}
 						}
 					}
@@ -872,8 +909,26 @@ struct Surface
 			pre1 = data1.xyz;
 			pre2 = data2.xyz;
 		}
+
+#ifdef SURFACE_LOAD_ENABLE_WIND
+		// Need interpolated wind transform:
+		pre0 = mul(inst.transformPrev.GetMatrix(), float4(pre0, 1)).xyz;
+		pre1 = mul(inst.transformPrev.GetMatrix(), float4(pre1, 1)).xyz;
+		pre2 = mul(inst.transformPrev.GetMatrix(), float4(pre2, 1)).xyz;
+		
+		[branch]
+		if (material.IsUsingWind())
+		{
+			pre0 += sample_wind_prev(pre0, data0.w);
+			pre1 += sample_wind_prev(pre1, data1.w);
+			pre2 += sample_wind_prev(pre2, data2.w);
+		}
+		pre = attribute_at_bary(pre0, pre1, pre2, bary);
+#else
+		// Simplified matrix transform is allowed without wind:
 		pre = attribute_at_bary(pre0, pre1, pre2, bary);
 		pre = mul(inst.transformPrev.GetMatrix(), float4(pre, 1)).xyz;
+#endif // SURFACE_LOAD_ENABLE_WIND
 
 		update();
 	}
@@ -938,14 +993,9 @@ struct Surface
 		[branch]
 		if (material.IsUsingWind())
 		{
-			float wind0 = ((asuint(data0.w) >> 24u) & 0xFF) / 255.0;
-			float wind1 = ((asuint(data1.w) >> 24u) & 0xFF) / 255.0;
-			float wind2 = ((asuint(data2.w) >> 24u) & 0xFF) / 255.0;
-
-			// this is hella slow to do per pixel:
-			P0 += compute_wind(P0, wind0);
-			P1 += compute_wind(P1, wind1);
-			P2 += compute_wind(P2, wind2);
+			P0 += sample_wind(P0, data0.w);
+			P1 += sample_wind(P1, data1.w);
+			P2 += sample_wind(P2, data2.w);
 		}
 #endif // SURFACE_LOAD_ENABLE_WIND
 
@@ -984,14 +1034,9 @@ struct Surface
 		[branch]
 		if (material.IsUsingWind())
 		{
-			float wind0 = ((asuint(data0.w) >> 24u) & 0xFF) / 255.0;
-			float wind1 = ((asuint(data1.w) >> 24u) & 0xFF) / 255.0;
-			float wind2 = ((asuint(data2.w) >> 24u) & 0xFF) / 255.0;
-
-			// this is hella slow to do per pixel:
-			P0 += compute_wind(P0, wind0);
-			P1 += compute_wind(P1, wind1);
-			P2 += compute_wind(P2, wind2);
+			P0 += sample_wind(P0, data0.w);
+			P1 += sample_wind(P1, data1.w);
+			P2 += sample_wind(P2, data2.w);
 		}
 #endif // SURFACE_LOAD_ENABLE_WIND
 

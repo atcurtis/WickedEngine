@@ -110,6 +110,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)SoftBodyWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)SoundWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)SpringWindow.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)SpriteWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -121,9 +122,11 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)TerrainWindow.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)FontWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)TransformWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)Translator.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)VideoWindow.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)VoxelGridWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)WeatherWindow.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)xatlas.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
@@ -176,13 +179,16 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)SoftBodyWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)SoundWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)SpringWindow.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)SpriteWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)stdafx.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)TerrainWindow.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)FontWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)tiny_gltf.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)tiny_obj_loader.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)TransformWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Translator.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)VideoWindow.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)VoxelGridWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)WeatherWindow.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)xatlas.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)yumin.h" />

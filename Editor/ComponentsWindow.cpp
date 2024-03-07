@@ -42,6 +42,9 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 	armatureWnd.Create(editor);
 	humanoidWnd.Create(editor);
 	terrainWnd.Create(editor);
+	spriteWnd.Create(editor);
+	fontWnd.Create(editor);
+	voxelGridWnd.Create(editor);
 
 	enum ADD_THING
 	{
@@ -68,6 +71,9 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 		ADD_CAMERA,
 		ADD_OBJECT,
 		ADD_VIDEO,
+		ADD_SPRITE,
+		ADD_FONT,
+		ADD_VOXELGRID,
 	};
 
 	newComponentCombo.Create("Add: ");
@@ -99,6 +105,9 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 	newComponentCombo.AddItem("Camera " ICON_CAMERA, ADD_CAMERA);
 	newComponentCombo.AddItem("Object " ICON_OBJECT, ADD_OBJECT);
 	newComponentCombo.AddItem("Video " ICON_VIDEO, ADD_VIDEO);
+	newComponentCombo.AddItem("Sprite " ICON_SPRITE, ADD_SPRITE);
+	newComponentCombo.AddItem("Font " ICON_FONT, ADD_FONT);
+	newComponentCombo.AddItem("Voxel Grid " ICON_VOXELGRID, ADD_VOXELGRID);
 	newComponentCombo.OnSelect([=](wi::gui::EventArgs args) {
 		newComponentCombo.SetSelectedWithoutCallback(-1);
 		if (editor->translator.selected.empty())
@@ -215,6 +224,18 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 			if (scene.videos.Contains(entity))
 				return;
 			break;
+		case ADD_SPRITE:
+			if (scene.sprites.Contains(entity))
+				return;
+			break;
+		case ADD_FONT:
+			if (scene.fonts.Contains(entity))
+				return;
+			break;
+		case ADD_VOXELGRID:
+			if (scene.voxel_grids.Contains(entity))
+				return;
+			break;
 		default:
 			return;
 		}
@@ -294,7 +315,11 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 			scene.scripts.Create(entity);
 			break;
 		case ADD_RIGIDBODY:
-			scene.rigidbodies.Create(entity);
+			{
+				RigidBodyPhysicsComponent& rigidbody = scene.rigidbodies.Create(entity);
+				rigidbody.SetKinematic(true); // Set it to kinematic so that it doesn't immediately fall
+				rigidbody.SetDisableDeactivation(true);
+			}
 			break;
 		case ADD_SOFTBODY:
 			scene.softbodies.Create(entity);
@@ -313,6 +338,15 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 			break;
 		case ADD_VIDEO:
 			scene.videos.Create(entity);
+			break;
+		case ADD_SPRITE:
+			scene.sprites.Create(entity);
+			break;
+		case ADD_FONT:
+			scene.fonts.Create(entity);
+			break;
+		case ADD_VOXELGRID:
+			scene.voxel_grids.Create(entity);
 			break;
 		default:
 			break;
@@ -354,6 +388,9 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 	AddWidget(&armatureWnd);
 	AddWidget(&humanoidWnd);
 	AddWidget(&terrainWnd);
+	AddWidget(&spriteWnd);
+	AddWidget(&fontWnd);
+	AddWidget(&voxelGridWnd);
 
 	materialWnd.SetVisible(false);
 	weatherWnd.SetVisible(false);
@@ -383,6 +420,9 @@ void ComponentsWindow::Create(EditorComponent* _editor)
 	armatureWnd.SetVisible(false);
 	humanoidWnd.SetVisible(false);
 	terrainWnd.SetVisible(false);
+	spriteWnd.SetVisible(false);
+	fontWnd.SetVisible(false);
+	voxelGridWnd.SetVisible(false);
 
 	XMFLOAT2 size = XMFLOAT2(338, 500);
 	if (editor->main->config.GetSection("layout").Has("components.width"))
@@ -799,5 +839,44 @@ void ComponentsWindow::ResizeLayout()
 	else
 	{
 		terrainWnd.SetVisible(false);
+	}
+
+	if (scene.sprites.Contains(spriteWnd.entity))
+	{
+		spriteWnd.SetVisible(true);
+		spriteWnd.SetPos(pos);
+		spriteWnd.SetSize(XMFLOAT2(width, spriteWnd.GetScale().y));
+		pos.y += spriteWnd.GetSize().y;
+		pos.y += padding;
+	}
+	else
+	{
+		spriteWnd.SetVisible(false);
+	}
+
+	if (scene.fonts.Contains(fontWnd.entity))
+	{
+		fontWnd.SetVisible(true);
+		fontWnd.SetPos(pos);
+		fontWnd.SetSize(XMFLOAT2(width, fontWnd.GetScale().y));
+		pos.y += fontWnd.GetSize().y;
+		pos.y += padding;
+	}
+	else
+	{
+		fontWnd.SetVisible(false);
+	}
+
+	if (scene.voxel_grids.Contains(voxelGridWnd.entity))
+	{
+		voxelGridWnd.SetVisible(true);
+		voxelGridWnd.SetPos(pos);
+		voxelGridWnd.SetSize(XMFLOAT2(width, voxelGridWnd.GetScale().y));
+		pos.y += voxelGridWnd.GetSize().y;
+		pos.y += padding;
+	}
+	else
+	{
+		voxelGridWnd.SetVisible(false);
 	}
 }

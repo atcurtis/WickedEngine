@@ -34,6 +34,7 @@ namespace wi::lua
 			{
 				bool result = wi::audio::CreateSound(wi::lua::SGetString(L, 1), &sound->sound);
 				wi::lua::SSetBool(L, result);
+				return 1;
 			}
 			else
 			{
@@ -288,11 +289,18 @@ REVERB_PRESET_PLATE = 29
 
 
 	Luna<Sound_BindLua>::FunctionType Sound_BindLua::methods[] = {
+		lunamethod(Sound_BindLua, IsValid),
 		{ NULL, NULL }
 	};
 	Luna<Sound_BindLua>::PropertyType Sound_BindLua::properties[] = {
 		{ NULL, NULL }
 	};
+
+	int Sound_BindLua::IsValid(lua_State* L)
+	{
+		wi::lua::SSetBool(L, sound.IsValid());
+		return 1;
+	}
 
 	void Sound_BindLua::Bind()
 	{
@@ -303,7 +311,6 @@ REVERB_PRESET_PLATE = 29
 			Luna<Sound_BindLua>::Register(wi::lua::GetLuaState());
 		}
 	}
-
 
 
 
@@ -322,6 +329,7 @@ REVERB_PRESET_PLATE = 29
 		lunamethod(SoundInstance_BindLua, GetLoopLength),
 		lunamethod(SoundInstance_BindLua, IsEnableReverb),
 		lunamethod(SoundInstance_BindLua, IsLooped),
+		lunamethod(SoundInstance_BindLua, IsValid),
 		{ NULL, NULL }
 	};
 	Luna<SoundInstance_BindLua>::PropertyType SoundInstance_BindLua::properties[] = {
@@ -439,6 +447,11 @@ REVERB_PRESET_PLATE = 29
 	int SoundInstance_BindLua::IsLooped(lua_State* L)
 	{
 		wi::lua::SSetBool(L, soundinstance.IsLooped());
+		return 1;
+	}
+	int SoundInstance_BindLua::IsValid(lua_State* L)
+	{
+		wi::lua::SSetBool(L, soundinstance.IsValid());
 		return 1;
 	}
 

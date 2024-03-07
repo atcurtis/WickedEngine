@@ -47,6 +47,9 @@ public:
 		Spring = 1 << 20,
 		Humanoid = 1 << 21,
 		Video = 1 << 22,
+		Sprite = 1 << 23,
+		Font = 1 << 24,
+		VoxelGrid = 1 << 25,
 
 		All = ~0ull,
 	} filter = Filter::All;
@@ -55,10 +58,13 @@ public:
 	wi::gui::TextInputField filterInput;
 	wi::gui::CheckBox filterCaseCheckBox;
 	wi::gui::TreeList entityTree;
+	wi::unordered_set<wi::ecs::Entity> entitytree_temp_items;
 	wi::unordered_set<wi::ecs::Entity> entitytree_added_items;
 	wi::unordered_set<wi::ecs::Entity> entitytree_opened_items;
 	void PushToEntityTree(wi::ecs::Entity entity, int level);
 	void RefreshEntityTree();
+
+	bool CheckEntityFilter(wi::ecs::Entity entity);
 };
 
 template<>

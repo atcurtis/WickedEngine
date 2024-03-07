@@ -70,6 +70,12 @@ namespace wi::scene
 		XMVECTOR GetPositionV() const;
 		XMVECTOR GetRotationV() const;
 		XMVECTOR GetScaleV() const;
+		XMFLOAT3 GetForward() const;
+		XMFLOAT3 GetUp() const;
+		XMFLOAT3 GetRight() const;
+		XMVECTOR GetForwardV() const;
+		XMVECTOR GetUpV() const;
+		XMVECTOR GetRightV() const;
 		// Computes the local space matrix from scale, rotation, translation and returns it
 		XMMATRIX GetLocalMatrix() const;
 		// Applies the local space to the world space matrix. This overwrites world matrix
@@ -122,6 +128,7 @@ namespace wi::scene
 			DOUBLE_SIDED = 1 << 11,
 			OUTLINE = 1 << 12,
 			PREFER_UNCOMPRESSED_TEXTURES = 1 << 13,
+			DISABLE_VERTEXAO = 1 << 14,
 		};
 		uint32_t _flags = CAST_SHADOW;
 
@@ -203,6 +210,7 @@ namespace wi::scene
 			CLEARCOATNORMALMAP,
 			SPECULARMAP,
 			ANISOTROPYMAP,
+			TRANSPARENCYMAP,
 
 			TEXTURESLOT_COUNT
 		};
@@ -267,6 +275,7 @@ namespace wi::scene
 		inline bool IsDoubleSided() const { return _flags & DOUBLE_SIDED; }
 		inline bool IsOutlineEnabled() const { return _flags & OUTLINE; }
 		inline bool IsPreferUncompressedTexturesEnabled() const { return _flags & PREFER_UNCOMPRESSED_TEXTURES; }
+		inline bool IsVertexAODisabled() const { return _flags & DISABLE_VERTEXAO; }
 
 		inline void SetBaseColor(const XMFLOAT4& value) { SetDirty(); baseColor = value; }
 		inline void SetSpecularColor(const XMFLOAT4& value) { SetDirty(); specularColor = value; }
@@ -306,6 +315,7 @@ namespace wi::scene
 		inline void SetDoubleSided(bool value = true) { if (value) { _flags |= DOUBLE_SIDED; } else { _flags &= ~DOUBLE_SIDED; } }
 		inline void SetOutlineEnabled(bool value = true) { if (value) { _flags |= OUTLINE; } else { _flags &= ~OUTLINE; } }
 		inline void SetPreferUncompressedTexturesEnabled(bool value = true) { if (value) { _flags |= PREFER_UNCOMPRESSED_TEXTURES; } else { _flags &= ~PREFER_UNCOMPRESSED_TEXTURES; } CreateRenderData(true); }
+		inline void SetVertexAODisabled(bool value = true) { if (value) { _flags |= DISABLE_VERTEXAO; } else { _flags &= ~DISABLE_VERTEXAO; } }
 
 		// The MaterialComponent will be written to ShaderMaterial (a struct that is optimized for GPU use)
 		void WriteShaderMaterial(ShaderMaterial* dest) const;
@@ -339,6 +349,7 @@ namespace wi::scene
 			TLAS_FORCE_DOUBLE_SIDED = 1 << 6,
 			DOUBLE_SIDED_SHADOW = 1 << 7,
 			BVH_ENABLED = 1 << 8,
+			QUANTIZED_POSITIONS_DISABLED = 1 << 9,
 		};
 		uint32_t _flags = RENDERABLE;
 
@@ -403,20 +414,24 @@ namespace wi::scene
 			}
 		};
 		BufferView ib;
-		BufferView vb_pos_nor_wind;
+		BufferView vb_pos_wind;
+		BufferView vb_nor;
 		BufferView vb_tan;
 		BufferView vb_uvs;
 		BufferView vb_atl;
 		BufferView vb_col;
 		BufferView vb_bon;
 		BufferView vb_mor;
-		BufferView so_pos_nor_wind;
+		BufferView so_pos;
+		BufferView so_nor;
 		BufferView so_tan;
 		BufferView so_pre;
 		uint32_t geometryOffset = 0;
 		uint32_t meshletCount = 0;
 		uint32_t active_morph_count = 0;
 		uint32_t morphGPUOffset = 0;
+		XMFLOAT2 uv_range_min = XMFLOAT2(0, 0);
+		XMFLOAT2 uv_range_max = XMFLOAT2(1, 1);
 
 		wi::vector<wi::graphics::RaytracingAccelerationStructure> BLASes; // one BLAS per LOD
 		enum BLAS_STATE
@@ -440,11 +455,16 @@ namespace wi::scene
 		//	false: BVH will be deleted immediately if it exists
 		inline void SetBVHEnabled(bool value) { if (value) { _flags |= BVH_ENABLED; if (!bvh.IsValid()) { BuildBVH(); } } else { _flags &= ~BVH_ENABLED; bvh = {}; bvh_leaf_aabbs.clear(); } }
 
+		// Disable quantization of position GPU data. You can use this if you notice inaccuracy in positions.
+		//	This should be enabled for connecting meshes like terrain chunks if their AABB is not consistent with each other
+		inline void SetQuantizedPositionsDisabled(bool value) { if (value) { _flags |= QUANTIZED_POSITIONS_DISABLED; } else { _flags &= ~QUANTIZED_POSITIONS_DISABLED; } }
+
 		inline bool IsRenderable() const { return _flags & RENDERABLE; }
 		inline bool IsDoubleSided() const { return _flags & DOUBLE_SIDED; }
 		inline bool IsDoubleSidedShadow() const { return _flags & DOUBLE_SIDED_SHADOW; }
 		inline bool IsDynamic() const { return _flags & DYNAMIC; }
 		inline bool IsBVHEnabled() const { return _flags & BVH_ENABLED; }
+		inline bool IsQuantizedPositionsDisabled() const { return _flags & QUANTIZED_POSITIONS_DISABLED; }
 
 		inline float GetTessellationFactor() const { return tessellationFactor; }
 		inline wi::graphics::IndexBufferFormat GetIndexFormat() const { return wi::graphics::GetIndexBufferFormat((uint32_t)vertex_positions.size()); }
@@ -493,75 +513,145 @@ namespace wi::scene
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 
-
-		struct Vertex_POS
+		struct Vertex_POS10
 		{
-			XMFLOAT3 pos = XMFLOAT3(0.0f, 0.0f, 0.0f);
-			uint8_t n_x = 0;
-			uint8_t n_y = 0;
-			uint8_t n_z = 0;
-			uint8_t w = 0;
+			uint32_t x : 10;
+			uint32_t y : 10;
+			uint32_t z : 10;
+			uint32_t w : 2;
 
-			constexpr void FromFULL(const XMFLOAT3& _pos, const XMFLOAT3& _nor, uint8_t wind)
+			constexpr void FromFULL(const wi::primitive::AABB& aabb, XMFLOAT3 pos, uint8_t wind)
 			{
-				pos.x = _pos.x;
-				pos.y = _pos.y;
-				pos.z = _pos.z;
-				MakeFromParams(_nor, wind);
+				pos = wi::math::InverseLerp(aabb._min, aabb._max, pos); // UNORM remap
+				x = uint32_t(wi::math::saturate(pos.x) * 1023.0f);
+				y = uint32_t(wi::math::saturate(pos.y) * 1023.0f);
+				z = uint32_t(wi::math::saturate(pos.z) * 1023.0f);
+				w = uint32_t((float(wind) / 255.0f) * 3);
 			}
-			inline XMVECTOR LoadPOS() const
+			inline XMVECTOR LoadPOS(const wi::primitive::AABB& aabb) const
 			{
-				return XMLoadFloat3(&pos);
+				XMFLOAT3 v = GetPOS(aabb);
+				return XMLoadFloat3(&v);
 			}
-			inline XMVECTOR LoadNOR() const
+			constexpr XMFLOAT3 GetPOS(const wi::primitive::AABB& aabb) const
 			{
-				XMFLOAT3 N = GetNor_FULL();
-				return XMLoadFloat3(&N);
-			}
-			constexpr void MakeFromParams(const XMFLOAT3& normal)
-			{
-				n_x = uint8_t((normal.x * 0.5f + 0.5f) * 255.0f);
-				n_y = uint8_t((normal.y * 0.5f + 0.5f) * 255.0f);
-				n_z = uint8_t((normal.z * 0.5f + 0.5f) * 255.0f);
-			}
-			constexpr void MakeFromParams(const XMFLOAT3& normal, uint8_t wind)
-			{
-				n_x = uint8_t((normal.x * 0.5f + 0.5f) * 255.0f);
-				n_y = uint8_t((normal.y * 0.5f + 0.5f) * 255.0f);
-				n_z = uint8_t((normal.z * 0.5f + 0.5f) * 255.0f);
-				w = wind;
-			}
-			constexpr XMFLOAT3 GetNor_FULL() const
-			{
-				XMFLOAT3 nor_FULL(0, 0, 0);
-				nor_FULL.x = (float(n_x) / 255.0f) * 2.0f - 1.0f;
-				nor_FULL.y = (float(n_y) / 255.0f) * 2.0f - 1.0f;
-				nor_FULL.z = (float(n_z) / 255.0f) * 2.0f - 1.0f;
-				return nor_FULL;
+				XMFLOAT3 v = XMFLOAT3(
+					float(x) / 1023.0f,
+					float(y) / 1023.0f,
+					float(z) / 1023.0f
+				);
+				return wi::math::Lerp(aabb._min, aabb._max, v);
 			}
 			constexpr uint8_t GetWind() const
 			{
-				return w;
+				return uint8_t((float(w) / 3.0f) * 255);
 			}
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R10G10B10A2_UNORM;
+		};
+		struct Vertex_POS16
+		{
+			uint16_t x = 0;
+			uint16_t y = 0;
+			uint16_t z = 0;
+			uint16_t w = 0;
 
+			constexpr void FromFULL(const wi::primitive::AABB& aabb, XMFLOAT3 pos, uint8_t wind)
+			{
+				pos = wi::math::InverseLerp(aabb._min, aabb._max, pos); // UNORM remap
+				x = uint16_t(pos.x * 65535.0f);
+				y = uint16_t(pos.y * 65535.0f);
+				z = uint16_t(pos.z * 65535.0f);
+				w = uint16_t((float(wind) / 255.0f) * 65535.0f);
+			}
+			inline XMVECTOR LoadPOS(const wi::primitive::AABB& aabb) const
+			{
+				XMFLOAT3 v = GetPOS(aabb);
+				return XMLoadFloat3(&v);
+			}
+			constexpr XMFLOAT3 GetPOS(const wi::primitive::AABB& aabb) const
+			{
+				XMFLOAT3 v = XMFLOAT3(
+					float(x) / 65535.0f,
+					float(y) / 65535.0f,
+					float(z) / 65535.0f
+				);
+				return wi::math::Lerp(aabb._min, aabb._max, v);
+			}
+			constexpr uint8_t GetWind() const
+			{
+				return uint8_t((float(w) / 65535.0f) * 255);
+			}
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R16G16B16A16_UNORM;
+		};
+		struct Vertex_POS32
+		{
+			float x = 0;
+			float y = 0;
+			float z = 0;
+
+			constexpr void FromFULL(const XMFLOAT3& pos)
+			{
+				x = pos.x;
+				y = pos.y;
+				z = pos.z;
+			}
+			inline XMVECTOR LoadPOS() const
+			{
+				return XMVectorSet(x, y, z, 1);
+			}
+			constexpr XMFLOAT3 GetPOS() const
+			{
+				return XMFLOAT3(x, y, z);
+			}
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R32G32B32_FLOAT;
+		};
+		struct Vertex_POS32W
+		{
+			float x = 0;
+			float y = 0;
+			float z = 0;
+			float w = 0;
+
+			constexpr void FromFULL(const XMFLOAT3& pos, uint8_t wind)
+			{
+				x = pos.x;
+				y = pos.y;
+				z = pos.z;
+				w = float(wind) / 255.0f;
+			}
+			inline XMVECTOR LoadPOS() const
+			{
+				return XMVectorSet(x, y, z, 1);
+			}
+			constexpr XMFLOAT3 GetPOS() const
+			{
+				return XMFLOAT3(x, y, z);
+			}
+			constexpr uint8_t GetWind() const
+			{
+				return uint8_t(w * 255);
+			}
 			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R32G32B32A32_FLOAT;
 		};
+		wi::graphics::Format position_format = Vertex_POS16::FORMAT; // CreateRenderData() will choose the appropriate format
+
 		struct Vertex_TEX
 		{
-			XMHALF2 tex = XMHALF2(0.0f, 0.0f);
+			uint16_t x = 0;
+			uint16_t y = 0;
 
-			void FromFULL(const XMFLOAT2& texcoords)
+			constexpr void FromFULL(const XMFLOAT2& uv, const XMFLOAT2& uv_range_min = XMFLOAT2(0, 0), const XMFLOAT2& uv_range_max = XMFLOAT2(1, 1))
 			{
-				tex = XMHALF2(texcoords.x, texcoords.y);
+				x = uint16_t(wi::math::InverseLerp(uv_range_min.x, uv_range_max.x, uv.x) * 65535.0f);
+				y = uint16_t(wi::math::InverseLerp(uv_range_min.y, uv_range_max.y, uv.y) * 65535.0f);
 			}
-
-			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R16G16_FLOAT;
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R16G16_UNORM;
 		};
 		struct Vertex_UVS
 		{
 			Vertex_TEX uv0;
 			Vertex_TEX uv1;
-			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R16G16B16A16_FLOAT;
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R16G16B16A16_UNORM;
 		};
 		struct Vertex_BON
 		{
@@ -606,6 +696,44 @@ namespace wi::scene
 			uint32_t color = 0;
 			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R8G8B8A8_UNORM;
 		};
+		struct Vertex_NOR
+		{
+			int8_t x = 0;
+			int8_t y = 0;
+			int8_t z = 0;
+			int8_t w = 0;
+
+			void FromFULL(const XMFLOAT3& nor)
+			{
+				XMVECTOR N = XMLoadFloat3(&nor);
+				N = XMVector3Normalize(N);
+				XMFLOAT3 n;
+				XMStoreFloat3(&n, N);
+
+				x = int8_t(n.x * 127.5f);
+				y = int8_t(n.y * 127.5f);
+				z = int8_t(n.z * 127.5f);
+				w = 0;
+			}
+			inline XMFLOAT3 GetNOR() const
+			{
+				return XMFLOAT3(
+					float(x) / 127.5f,
+					float(y) / 127.5f,
+					float(z) / 127.5f
+				);
+			}
+			inline XMVECTOR LoadNOR() const
+			{
+				return XMVectorSet(
+					float(x) / 127.5f,
+					float(y) / 127.5f,
+					float(z) / 127.5f,
+					0
+				);
+			}
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R8G8B8A8_SNORM;
+		};
 		struct Vertex_TAN
 		{
 			int8_t x = 0;
@@ -626,7 +754,15 @@ namespace wi::scene
 				z = int8_t(t.z * 127.5f);
 				w = int8_t(t.w * 127.5f);
 			}
-
+			inline XMFLOAT4 GetTAN() const
+			{
+				return XMFLOAT4(
+					float(x) / 127.5f,
+					float(y) / 127.5f,
+					float(z) / 127.5f,
+					float(w) / 127.5f
+				);
+			}
 			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R8G8B8A8_SNORM;
 		};
 
@@ -683,12 +819,15 @@ namespace wi::scene
 		uint32_t lightmapHeight = 0;
 		wi::vector<uint8_t> lightmapTextureData;
 		uint32_t sort_priority = 0; // increase to draw earlier (currently 4 bits will be used)
+		wi::vector<uint8_t> vertex_ao;
 
 		// Non-serialized attributes:
 		uint32_t filterMaskDynamic = 0;
 
 		wi::graphics::Texture lightmap;
 		mutable uint32_t lightmapIterationCount = 0;
+		wi::graphics::GPUBuffer vb_ao;
+		int vb_ao_srv = -1;
 
 		XMFLOAT3 center = XMFLOAT3(0, 0, 0);
 		float radius = 0;
@@ -739,6 +878,14 @@ namespace wi::scene
 		void CompressLightmap(); // not thread safe if LIGHTMAP_BLOCK_COMPRESSION is enabled!
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
+
+		void CreateRenderData();
+		void DeleteRenderData();
+		struct Vertex_AO
+		{
+			uint8_t value = 0;
+			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R8_UNORM;
+		};
 	};
 
 	struct RigidBodyPhysicsComponent
@@ -819,7 +966,8 @@ namespace wi::scene
 		// Non-serialized attributes:
 		std::shared_ptr<void> physicsobject = nullptr; // You can set to null to recreate the physics object the next time phsyics system will be running.
 		XMFLOAT4X4 worldMatrix = wi::math::IDENTITY_MATRIX;
-		wi::vector<MeshComponent::Vertex_POS> vertex_positions_simulation; // graphics vertices after simulation (world space)
+		wi::vector<MeshComponent::Vertex_POS32> vertex_positions_simulation; // graphics vertices after simulation (world space)
+		wi::vector<MeshComponent::Vertex_NOR> vertex_normals_simulation;
 		wi::vector<XMFLOAT4>vertex_tangents_tmp;
 		wi::vector<MeshComponent::Vertex_TAN> vertex_tangents_simulation;
 		wi::primitive::AABB aabb;
@@ -827,6 +975,11 @@ namespace wi::scene
 		inline void SetDisableDeactivation(bool value) { if (value) { _flags |= DISABLE_DEACTIVATION; } else { _flags &= ~DISABLE_DEACTIVATION; } }
 
 		inline bool IsDisableDeactivation() const { return _flags & DISABLE_DEACTIVATION; }
+
+		inline bool HasVertices() const
+		{
+			return !vertex_positions_simulation.empty();
+		}
 
 		// Create physics represenation of graphics mesh
 		void CreateFromMesh(const MeshComponent& mesh);
@@ -894,14 +1047,11 @@ namespace wi::scene
 		int forced_shadow_resolution = -1; // -1: disabled, greater: fixed shadow map resolution
 
 		// Non-serialized attributes:
-		XMFLOAT3 position;
-		XMFLOAT3 direction;
-		XMFLOAT4 rotation;
-		XMFLOAT3 scale;
-		XMFLOAT3 front;
-		XMFLOAT3 right;
+		XMFLOAT3 position = XMFLOAT3(0, 0, 0);
+		XMFLOAT3 direction = XMFLOAT3(0, 1, 0);
+		XMFLOAT4 rotation = XMFLOAT4(0, 0, 0, 1);
+		XMFLOAT3 scale = XMFLOAT3(1, 1, 1);
 		mutable int occlusionquery = -1;
-		wi::rectpacker::Rect shadow_rect = {};
 
 		wi::vector<wi::Resource> lensFlareRimTextures;
 
@@ -995,8 +1145,7 @@ namespace wi::scene
 		int texture_rtshadow_index = -1;
 		int texture_rtdiffuse_index = -1;
 		int texture_surfelgi_index = -1;
-		int buffer_entitytiles_opaque_index = -1;
-		int buffer_entitytiles_transparent_index = -1;
+		int buffer_entitytiles_index = -1;
 		int texture_vxgi_diffuse_index = -1;
 		int texture_vxgi_specular_index = -1;
 
@@ -1103,7 +1252,7 @@ namespace wi::scene
 		float slopeBlendPower = 0;
 
 		// Set decal to only use alpha from base color texture. Useful for blending normalmap-only decals
-		constexpr void SetBaseColorOnlyAlpha(bool value) { if (value) { _flags |= BASECOLOR_ONLY_ALPHA; } else { _flags ^= BASECOLOR_ONLY_ALPHA; } }
+		constexpr void SetBaseColorOnlyAlpha(bool value) { if (value) { _flags |= BASECOLOR_ONLY_ALPHA; } else { _flags &= ~BASECOLOR_ONLY_ALPHA; } }
 
 		constexpr bool IsBaseColorOnlyAlpha() const { return _flags & BASECOLOR_ONLY_ALPHA; }
 
@@ -1147,6 +1296,7 @@ namespace wi::scene
 			EMPTY = 0,
 			PLAYING = 1 << 0,
 			LOOPED = 1 << 1,
+			ROOT_MOTION = 1 << 2
 		};
 		uint32_t _flags = LOOPED;
 		float start = 0;
@@ -1271,15 +1421,35 @@ namespace wi::scene
 		wi::vector<float> morph_weights_temp;
 		float last_update_time = 0;
 
+		// Root Motion
+		XMFLOAT3 rootTranslationOffset;
+		XMFLOAT4 rootRotationOffset;
+		wi::ecs::Entity rootMotionBone;
+
+		XMVECTOR rootPrevTranslation = XMVectorSet(-69, 420, 69, -420);
+		XMVECTOR rootPrevRotation = XMVectorSet(-69, 420, 69, -420);
+		XMVECTOR INVALID_VECTOR = XMVectorSet(-69, 420, 69, -420);
+		float prevLocTimer;
+		float prevRotTimer;
+		// Root Motion
+
 		inline bool IsPlaying() const { return _flags & PLAYING; }
 		inline bool IsLooped() const { return _flags & LOOPED; }
 		inline float GetLength() const { return end - start; }
 		inline bool IsEnded() const { return timer >= end; }
+		inline bool IsRootMotion() const { return _flags & ROOT_MOTION; }
 
 		inline void Play() { _flags |= PLAYING; }
 		inline void Pause() { _flags &= ~PLAYING; }
 		inline void Stop() { Pause(); timer = 0.0f; last_update_time = timer; }
 		inline void SetLooped(bool value = true) { if (value) { _flags |= LOOPED; } else { _flags &= ~LOOPED; } }
+
+		inline void RootMotionOn() { _flags |= ROOT_MOTION; }
+		inline void RootMotionOff() { _flags &= ~ROOT_MOTION; }
+		inline XMFLOAT3 GetRootTranslation() const { return rootTranslationOffset; }
+		inline XMFLOAT4 GetRootRotation() const { return rootRotationOffset; }
+		inline wi::ecs::Entity GetRootMotionBone() const { return rootMotionBone; }
+		inline void SetRootMotionBone(wi::ecs::Entity _rootMotionBone) { rootMotionBone = _rootMotionBone; }
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 	};
@@ -1342,6 +1512,12 @@ namespace wi::scene
 		float stars = 0.5f;
 		XMFLOAT3 gravity = XMFLOAT3(0, -10, 0);
 		float sky_rotation = 0; // horizontal rotation for skyMap texture (in radians)
+		float rain_amount = 0;
+		float rain_length = 0.04f;
+		float rain_speed = 1;
+		float rain_scale = 0.005f;
+		float rain_splash_scale = 0.1f;
+		XMFLOAT4 rain_color = XMFLOAT4(0.6f, 0.8f, 1, 0.5f);
 
 		wi::Ocean::OceanParameters oceanParameters;
 		AtmosphereParameters atmosphereParameters;
@@ -1667,6 +1843,7 @@ namespace wi::scene
 		{
 			NONE = 0,
 			LOOKAT = 1 << 0,
+			RAGDOLL_PHYSICS = 1 << 1,
 		};
 		uint32_t _flags = LOOKAT;
 
@@ -1743,8 +1920,10 @@ namespace wi::scene
 		wi::ecs::Entity bones[size_t(HumanoidBone::Count)] = {};
 
 		constexpr bool IsLookAtEnabled() const { return _flags & LOOKAT; }
+		constexpr bool IsRagdollPhysicsEnabled() const { return _flags & RAGDOLL_PHYSICS; }
 
 		constexpr void SetLookAtEnabled(bool value = true) { if (value) { _flags |= LOOKAT; } else { _flags &= ~LOOKAT; } }
+		constexpr void SetRagdollPhysicsEnabled(bool value = true) { if (value) { _flags |= RAGDOLL_PHYSICS; } else { _flags &= ~RAGDOLL_PHYSICS; } }
 
 		XMFLOAT3 default_look_direction = XMFLOAT3(0, 0, 1);
 		XMFLOAT2 head_rotation_max = XMFLOAT2(XM_PI / 3.0f, XM_PI / 6.0f);
@@ -1752,11 +1931,15 @@ namespace wi::scene
 		XMFLOAT2 eye_rotation_max = XMFLOAT2(XM_PI / 20.0f, XM_PI / 20.0f);
 		float eye_rotation_speed = 0.1f;
 
+		float ragdoll_fatness = 1.0f;
+		float ragdoll_headsize = 1.0f;
+
 		// Non-serialized attributes:
 		XMFLOAT3 lookAt = {}; // lookAt target pos, can be set by user
 		XMFLOAT4 lookAtDeltaRotationState_Head = XMFLOAT4(0, 0, 0, 1);
 		XMFLOAT4 lookAtDeltaRotationState_LeftEye = XMFLOAT4(0, 0, 0, 1);
 		XMFLOAT4 lookAtDeltaRotationState_RightEye = XMFLOAT4(0, 0, 0, 1);
+		std::shared_ptr<void> ragdoll = nullptr; // physics system implementation-specific object
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 	};

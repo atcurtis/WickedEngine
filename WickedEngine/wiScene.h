@@ -4,6 +4,7 @@
 #include "wiSpinLock.h"
 #include "wiGPUBVH.h"
 #include "wiSprite.h"
+#include "wiSpriteFont.h"
 #include "wiMath.h"
 #include "wiECS.h"
 #include "wiScene_Components.h"
@@ -12,6 +13,8 @@
 #include "wiTerrain.h"
 #include "wiBVH.h"
 #include "wiUnorderedSet.h"
+#include "wiVoxelGrid.h"
+#include "wiPathQuery.h"
 
 #include <string>
 #include <memory>
@@ -29,10 +32,10 @@ namespace wi::scene
 		wi::ecs::ComponentManager<LayerComponent>& layers = componentLibrary.Register<LayerComponent>("wi::scene::Scene::layers");
 		wi::ecs::ComponentManager<TransformComponent>& transforms = componentLibrary.Register<TransformComponent>("wi::scene::Scene::transforms");
 		wi::ecs::ComponentManager<HierarchyComponent>& hierarchy = componentLibrary.Register<HierarchyComponent>("wi::scene::Scene::hierarchy");
-		wi::ecs::ComponentManager<MaterialComponent>& materials = componentLibrary.Register<MaterialComponent>("wi::scene::Scene::materials", 2); // version = 2
+		wi::ecs::ComponentManager<MaterialComponent>& materials = componentLibrary.Register<MaterialComponent>("wi::scene::Scene::materials", 3); // version = 3
 		wi::ecs::ComponentManager<MeshComponent>& meshes = componentLibrary.Register<MeshComponent>("wi::scene::Scene::meshes", 2); // version = 2
 		wi::ecs::ComponentManager<ImpostorComponent>& impostors = componentLibrary.Register<ImpostorComponent>("wi::scene::Scene::impostors");
-		wi::ecs::ComponentManager<ObjectComponent>& objects = componentLibrary.Register<ObjectComponent>("wi::scene::Scene::objects", 2); // version = 2
+		wi::ecs::ComponentManager<ObjectComponent>& objects = componentLibrary.Register<ObjectComponent>("wi::scene::Scene::objects", 3); // version = 3
 		wi::ecs::ComponentManager<RigidBodyPhysicsComponent>& rigidbodies = componentLibrary.Register<RigidBodyPhysicsComponent>("wi::scene::Scene::rigidbodies", 1); // version = 1
 		wi::ecs::ComponentManager<SoftBodyPhysicsComponent>& softbodies = componentLibrary.Register<SoftBodyPhysicsComponent>("wi::scene::Scene::softbodies");
 		wi::ecs::ComponentManager<ArmatureComponent>& armatures = componentLibrary.Register<ArmatureComponent>("wi::scene::Scene::armatures");
@@ -41,11 +44,11 @@ namespace wi::scene
 		wi::ecs::ComponentManager<EnvironmentProbeComponent>& probes = componentLibrary.Register<EnvironmentProbeComponent>("wi::scene::Scene::probes", 1); // version = 1
 		wi::ecs::ComponentManager<ForceFieldComponent>& forces = componentLibrary.Register<ForceFieldComponent>("wi::scene::Scene::forces", 1); // version = 1
 		wi::ecs::ComponentManager<DecalComponent>& decals = componentLibrary.Register<DecalComponent>("wi::scene::Scene::decals", 1); // version = 1
-		wi::ecs::ComponentManager<AnimationComponent>& animations = componentLibrary.Register<AnimationComponent>("wi::scene::Scene::animations", 1); // version = 1
+		wi::ecs::ComponentManager<AnimationComponent>& animations = componentLibrary.Register<AnimationComponent>("wi::scene::Scene::animations", 2); // version = 2
 		wi::ecs::ComponentManager<AnimationDataComponent>& animation_datas = componentLibrary.Register<AnimationDataComponent>("wi::scene::Scene::animation_datas");
 		wi::ecs::ComponentManager<EmittedParticleSystem>& emitters = componentLibrary.Register<EmittedParticleSystem>("wi::scene::Scene::emitters");
 		wi::ecs::ComponentManager<HairParticleSystem>& hairs = componentLibrary.Register<HairParticleSystem>("wi::scene::Scene::hairs");
-		wi::ecs::ComponentManager<WeatherComponent>& weathers = componentLibrary.Register<WeatherComponent>("wi::scene::Scene::weathers", 4); // version = 4
+		wi::ecs::ComponentManager<WeatherComponent>& weathers = componentLibrary.Register<WeatherComponent>("wi::scene::Scene::weathers", 5); // version = 5
 		wi::ecs::ComponentManager<SoundComponent>& sounds = componentLibrary.Register<SoundComponent>("wi::scene::Scene::sounds", 1); // version = 1
 		wi::ecs::ComponentManager<VideoComponent>& videos = componentLibrary.Register<VideoComponent>("wi::scene::Scene::videos");
 		wi::ecs::ComponentManager<InverseKinematicsComponent>& inverse_kinematics = componentLibrary.Register<InverseKinematicsComponent>("wi::scene::Scene::inverse_kinematics");
@@ -53,8 +56,11 @@ namespace wi::scene
 		wi::ecs::ComponentManager<ColliderComponent>& colliders = componentLibrary.Register<ColliderComponent>("wi::scene::Scene::colliders", 2); // version = 2
 		wi::ecs::ComponentManager<ScriptComponent>& scripts = componentLibrary.Register<ScriptComponent>("wi::scene::Scene::scripts");
 		wi::ecs::ComponentManager<ExpressionComponent>& expressions = componentLibrary.Register<ExpressionComponent>("wi::scene::Scene::expressions");
-		wi::ecs::ComponentManager<HumanoidComponent>& humanoids = componentLibrary.Register<HumanoidComponent>("wi::scene::Scene::humanoids");
+		wi::ecs::ComponentManager<HumanoidComponent>& humanoids = componentLibrary.Register<HumanoidComponent>("wi::scene::Scene::humanoids", 1); // version = 1
 		wi::ecs::ComponentManager<wi::terrain::Terrain>& terrains = componentLibrary.Register<wi::terrain::Terrain>("wi::scene::Scene::terrains", 3); // version = 3
+		wi::ecs::ComponentManager<wi::Sprite>& sprites = componentLibrary.Register<wi::Sprite>("wi::scene::Scene::sprites");
+		wi::ecs::ComponentManager<wi::SpriteFont>& fonts = componentLibrary.Register<wi::SpriteFont>("wi::scene::Scene::fonts");
+		wi::ecs::ComponentManager<wi::VoxelGrid>& voxel_grids = componentLibrary.Register<wi::VoxelGrid>("wi::scene::Scene::voxel_grids");
 
 		// Non-serialized attributes:
 		float dt = 0;
@@ -225,13 +231,21 @@ namespace wi::scene
 		uint32_t allocated_impostor_capacity = 0;
 		MeshComponent::BufferView impostor_ib32;
 		MeshComponent::BufferView impostor_ib16;
-		MeshComponent::BufferView impostor_vb;
+		MeshComponent::BufferView impostor_vb_pos;
+		MeshComponent::BufferView impostor_vb_nor;
 		MeshComponent::BufferView impostor_data;
 		MeshComponent::BufferView impostor_indirect;
 		wi::graphics::Format impostor_ib_format = wi::graphics::Format::R32_UINT;
 		uint32_t impostorInstanceOffset = ~0u;
 		uint32_t impostorGeometryOffset = ~0u;
 		uint32_t impostorMaterialOffset = ~0u;
+
+		wi::EmittedParticleSystem rainEmitter;
+		MaterialComponent rainMaterial;
+		uint32_t rainInstanceOffset = ~0u;
+		uint32_t rainGeometryOffset = ~0u;
+		uint32_t rainMaterialOffset = ~0u;
+		LightComponent rain_blocker_dummy_light;
 
 		std::atomic<uint32_t> lightmap_request_allocator{ 0 };
 		wi::vector<uint32_t> lightmap_requests;
@@ -254,6 +268,7 @@ namespace wi::scene
 
 		// Simple water ripple sprites:
 		mutable wi::vector<wi::Sprite> waterRipples;
+		void PutWaterRipple(const XMFLOAT3& pos);
 		void PutWaterRipple(const std::string& image, const XMFLOAT3& pos);
 
 		// Animation processing optimizer:
@@ -411,6 +426,8 @@ namespace wi::scene
 		void RunSoundUpdateSystem(wi::jobsystem::context& ctx);
 		void RunVideoUpdateSystem(wi::jobsystem::context& ctx);
 		void RunScriptUpdateSystem(wi::jobsystem::context& ctx);
+		void RunSpriteUpdateSystem(wi::jobsystem::context& ctx);
+		void RunFontUpdateSystem(wi::jobsystem::context& ctx);
 
 
 		struct RayIntersectionResult
@@ -432,11 +449,20 @@ namespace wi::scene
 				return entity == other.entity;
 			}
 		};
-		// Given a ray, finds the closest intersection point against all mesh instances
+		// Given a ray, finds the closest intersection point against all mesh instances or collliders
 		//	ray				:	the incoming ray that will be traced
-		//	renderTypeMask	:	filter based on render type
+		//	filterMask		:	filter based on type
 		//	layerMask		:	filter based on layer
+		//	lod				:	specify min level of detail for meshes
 		RayIntersectionResult Intersects(const wi::primitive::Ray& ray, uint32_t filterMask = wi::enums::FILTER_OPAQUE, uint32_t layerMask = ~0, uint32_t lod = 0) const;
+
+		// Given a ray, finds the first intersection point against all mesh instances or colliders
+		//	returns true immediately if intersection was found, false otherwise
+		//	ray				:	the incoming ray that will be traced
+		//	filterMask		:	filter based on type
+		//	layerMask		:	filter based on layer
+		//	lod				:	specify min level of detail for meshes
+		bool IntersectsFirst(const wi::primitive::Ray& ray, uint32_t filterMask = wi::enums::FILTER_OPAQUE, uint32_t layerMask = ~0, uint32_t lod = 0) const;
 
 		struct SphereIntersectionResult
 		{
@@ -466,6 +492,20 @@ namespace wi::scene
 		//
 		//	returns entity ID of the new animation or INVALID_ENTITY if retargeting was not successful
 		wi::ecs::Entity RetargetAnimation(wi::ecs::Entity dst, wi::ecs::Entity src, bool bake_data, const Scene* src_scene = nullptr);
+
+		// If you don't know which armature the bone is contained int, this function can be used to find the first such armature and return the bone's rest matrix
+		//	If not found, return identity matrix
+		XMMATRIX FindBoneRestPose(wi::ecs::Entity bone) const;
+
+		// All triangles of the object will be injected into the voxel grid
+		//	subtract: if false (default), voxels will be added, if true then voxels will be removed
+		void VoxelizeObject(size_t objectIndex, wi::VoxelGrid& grid, bool subtract = false, uint32_t lod = 0);
+
+		// Voxelize all meshes that match the filters into a voxel grid
+		void VoxelizeScene(wi::VoxelGrid& voxelgrid, bool subtract = false, uint32_t filterMask = wi::enums::FILTER_ALL, uint32_t layerMask = ~0, uint32_t lod = 0);
+
+		// Get the current position on the surface of an object, tracked by the triangle barycentrics
+		XMFLOAT3 GetPositionOnSurface(wi::ecs::Entity objectEntity, int vertexID0, int vertexID1, int vertexID2, const XMFLOAT2& bary) const;
 	};
 
 	// Returns skinned vertex position in armature local space

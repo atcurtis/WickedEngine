@@ -11,9 +11,10 @@ static const float3 BILLBOARD[] =
 };
 
 RWBuffer<uint> output_indices : register(u0);
-RWBuffer<float4> output_vertices_pos_nor : register(u1);
-RWByteAddressBuffer output_impostor_data : register(u2);
-RWStructuredBuffer<IndirectDrawArgsIndexedInstanced> output_indirect : register(u3);
+RWByteAddressBuffer output_vertices_pos : register(u1);
+RWBuffer<float4> output_vertices_nor : register(u2);
+RWByteAddressBuffer output_impostor_data : register(u3);
+RWStructuredBuffer<IndirectDrawArgsIndexedInstanced> output_indirect : register(u4);
 
 struct ObjectCount
 {
@@ -59,12 +60,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
 		const uint vertexOffset = impostorOffset * 4u;
 
 		// Write out indices:
-		output_indices[indexOffset + 0] = vertexOffset + 0;
+		output_indices[indexOffset + 0] = vertexOffset + 0; // provoking vertex prim0
 		output_indices[indexOffset + 1] = vertexOffset + 1;
 		output_indices[indexOffset + 2] = vertexOffset + 2;
-		output_indices[indexOffset + 3] = vertexOffset + 2;
-		output_indices[indexOffset + 4] = vertexOffset + 1;
-		output_indices[indexOffset + 5] = vertexOffset + 3;
+		output_indices[indexOffset + 3] = vertexOffset + 3; // provoking vertex prim1
+		output_indices[indexOffset + 4] = vertexOffset + 2;
+		output_indices[indexOffset + 5] = vertexOffset + 1;
 
 		// We rotate the billboard to face camera, but unlike emitted particles, 
 		//	they don't rotate according to camera rotation, but the camera position relative
@@ -103,7 +104,12 @@ void main(uint3 DTid : SV_DispatchThreadID)
 			pos = mul(pos, float3x3(right, up, face));
 			pos *= instance.radius;
 			pos += instance.center;
-			output_vertices_pos_nor[vertexOffset + vertexID] = float4(pos, asfloat(pack_unitvector(face)));
+#ifdef __PSSL__
+			output_vertices_pos.TypedStore<float3>((vertexOffset + vertexID) * sizeof(float3), pos);
+#else
+			output_vertices_pos.Store<float3>((vertexOffset + vertexID) * sizeof(float3), pos);
+#endif // __PSSL__
+			output_vertices_nor[vertexOffset + vertexID] = float4(face, 0);
 		}
 	}
 }

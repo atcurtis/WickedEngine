@@ -274,20 +274,20 @@ namespace wi::graphics
 
 		// Formats that are not usable in render pass must be below because formats in render pass must be encodable as 6 bits:
 
-		BC1_UNORM,
-		BC1_UNORM_SRGB,
-		BC2_UNORM,
-		BC2_UNORM_SRGB,
-		BC3_UNORM,
-		BC3_UNORM_SRGB,
-		BC4_UNORM,
-		BC4_SNORM,
-		BC5_UNORM,
-		BC5_SNORM,
-		BC6H_UF16,
-		BC6H_SF16,
-		BC7_UNORM,
-		BC7_UNORM_SRGB,
+		BC1_UNORM,			// Three color channels (5 bits:6 bits:5 bits), with 0 or 1 bit(s) of alpha
+		BC1_UNORM_SRGB,		// Three color channels (5 bits:6 bits:5 bits), with 0 or 1 bit(s) of alpha
+		BC2_UNORM,			// Three color channels (5 bits:6 bits:5 bits), with 4 bits of alpha
+		BC2_UNORM_SRGB,		// Three color channels (5 bits:6 bits:5 bits), with 4 bits of alpha
+		BC3_UNORM,			// Three color channels (5 bits:6 bits:5 bits) with 8 bits of alpha
+		BC3_UNORM_SRGB,		// Three color channels (5 bits:6 bits:5 bits) with 8 bits of alpha
+		BC4_UNORM,			// One color channel (8 bits)
+		BC4_SNORM,			// One color channel (8 bits)
+		BC5_UNORM,			// Two color channels (8 bits:8 bits)
+		BC5_SNORM,			// Two color channels (8 bits:8 bits)
+		BC6H_UF16,			// Three color channels (16 bits:16 bits:16 bits) in "half" floating point
+		BC6H_SF16,			// Three color channels (16 bits:16 bits:16 bits) in "half" floating point
+		BC7_UNORM,			// Three color channels (4 to 7 bits per channel) with 0 to 8 bits of alpha
+		BC7_UNORM_SRGB,		// Three color channels (4 to 7 bits per channel) with 0 to 8 bits of alpha
 
 		NV12,				// video YUV420; SRV Luminance aspect: R8_UNORM, SRV Chrominance aspect: R8G8_UNORM
 	};
@@ -404,6 +404,7 @@ namespace wi::graphics
 		VIDEO_DECODE = 1 << 13,	// resource is usabe in video decoding operations
 		NO_DEFAULT_DESCRIPTORS = 1 << 14, // skips creation of default descriptors for resources
 		TEXTURE_COMPATIBLE_COMPRESSION = 1 << 15, // optimization that can enable sampling from compressed textures
+		SHARED = 1 << 16, // shared texture
 	};
 
 	enum class GraphicsDeviceCapability
@@ -842,6 +843,12 @@ namespace wi::graphics
 
 		// These are only valid if texture was created with ResourceMiscFlag::SPARSE flag:
 		const SparseTextureProperties* sparse_properties = nullptr;
+
+#if defined(_WIN32)
+		void* shared_handle = nullptr; /* HANDLE */
+#else
+		int shared_handle = 0;
+#endif
 
 		constexpr const TextureDesc& GetDesc() const { return desc; }
 	};
@@ -1727,6 +1734,45 @@ namespace wi::graphics
 		ret.chars[3] = GetComponentSwizzleChar(swizzle.a);
 		ret.chars[4] = 0;
 		return ret;
+	}
+	constexpr Swizzle SwizzleFromString(const char* str)
+	{
+		Swizzle swizzle;
+		if (str == nullptr)
+			return swizzle;
+		ComponentSwizzle* comp = (ComponentSwizzle*)&swizzle;
+		for (int i = 0; i < 4; ++i)
+		{
+			switch (str[i])
+			{
+			case 'r':
+			case 'R':
+				*comp = ComponentSwizzle::R;
+				break;
+			case 'g':
+			case 'G':
+				*comp = ComponentSwizzle::G;
+				break;
+			case 'b':
+			case 'B':
+				*comp = ComponentSwizzle::B;
+				break;
+			case 'a':
+			case 'A':
+				*comp = ComponentSwizzle::A;
+				break;
+			case '0':
+				*comp = ComponentSwizzle::ZERO;
+				break;
+			case '1':
+				*comp = ComponentSwizzle::ONE;
+				break;
+			case 0:
+				return swizzle;
+			}
+			comp++;
+		}
+		return swizzle;
 	}
 
 	template<typename T>

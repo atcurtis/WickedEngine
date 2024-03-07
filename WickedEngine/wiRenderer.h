@@ -4,6 +4,7 @@
 #include "wiGraphicsDevice.h"
 #include "wiScene.h"
 #include "wiECS.h"
+#include "wiRectPacker.h"
 #include "wiPrimitive.h"
 #include "wiCanvas.h"
 #include "wiMath.h"
@@ -13,6 +14,12 @@
 
 #include <memory>
 #include <limits>
+
+namespace wi
+{
+	struct VoxelGrid;
+	struct PathQuery;
+}
 
 namespace wi::renderer
 {
@@ -31,12 +38,11 @@ namespace wi::renderer
 	{
 		return (userStencilRef << 4) | static_cast<uint8_t>(engineStencilRef);
 	}
-	constexpr XMUINT3 GetEntityCullingTileCount(XMUINT2 internalResolution)
+	constexpr XMUINT2 GetEntityCullingTileCount(XMUINT2 internalResolution)
 	{
-		return XMUINT3(
+		return XMUINT2(
 			(internalResolution.x + TILED_CULLING_BLOCKSIZE - 1) / TILED_CULLING_BLOCKSIZE,
-			(internalResolution.y + TILED_CULLING_BLOCKSIZE - 1) / TILED_CULLING_BLOCKSIZE,
-			1
+			(internalResolution.y + TILED_CULLING_BLOCKSIZE - 1) / TILED_CULLING_BLOCKSIZE
 		);
 	}
 	constexpr XMUINT2 GetVisibilityTileCount(XMUINT2 internalResolution)
@@ -110,6 +116,7 @@ namespace wi::renderer
 			ALLOW_HAIRS = 1 << 5,
 			ALLOW_REQUEST_REFLECTION = 1 << 6,
 			ALLOW_OCCLUSION_CULLING = 1 << 7,
+			ALLOW_SHADOW_ATLAS_PACKING = 1 << 8,
 
 			ALLOW_EVERYTHING = ~0u
 		};
@@ -123,6 +130,9 @@ namespace wi::renderer
 		wi::vector<uint32_t> visibleEmitters;
 		wi::vector<uint32_t> visibleHairs;
 		wi::vector<uint32_t> visibleLights;
+		wi::rectpacker::State shadow_packer;
+		wi::rectpacker::Rect rain_blocker_shadow_rect;
+		wi::vector<wi::rectpacker::Rect> visibleLightShadowRects;
 
 		std::atomic<uint32_t> object_counter;
 		std::atomic<uint32_t> light_counter;
@@ -261,6 +271,13 @@ namespace wi::renderer
 		bool distortion, 
 		wi::graphics::CommandList cmd
 	);
+	// Draw the sprites and fonts from the scene
+	void DrawSpritesAndFonts(
+		const wi::scene::Scene& scene,
+		const wi::scene::CameraComponent& camera,
+		bool distortion,
+		wi::graphics::CommandList cmd
+	);
 	// Draw simple light visualizer geometries
 	void DrawLightVisualizers(
 		const Visibility& vis,
@@ -289,15 +306,15 @@ namespace wi::renderer
 
 	struct TiledLightResources
 	{
-		XMUINT3 tileCount = {};
+		XMUINT2 tileCount = {};
 		wi::graphics::GPUBuffer tileFrustums; // entity culling frustums
-		wi::graphics::GPUBuffer entityTiles_Opaque; // culled entity indices (for opaque pass)
-		wi::graphics::GPUBuffer entityTiles_Transparent; // culled entity indices (for transparent pass)
+		wi::graphics::GPUBuffer entityTiles; // culled entity indices
 	};
 	void CreateTiledLightResources(TiledLightResources& res, XMUINT2 resolution);
 	// Compute light grid tiles
 	void ComputeTiledLightCulling(
 		const TiledLightResources& res,
+		const Visibility& vis,
 		const wi::graphics::Texture& debugUAV,
 		wi::graphics::CommandList cmd
 	);
@@ -405,11 +422,11 @@ namespace wi::renderer
 	// VXGI: Voxel-based Global Illumination (voxel cone tracing-based)
 	struct VXGIResources
 	{
-		wi::graphics::Texture diffuse[2];
-		wi::graphics::Texture specular[2];
+		wi::graphics::Texture diffuse;
+		wi::graphics::Texture specular;
 		mutable bool pre_clear = true;
 
-		bool IsValid() const { return diffuse[0].IsValid(); }
+		bool IsValid() const { return diffuse.IsValid(); }
 	};
 	void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution);
 	void VXGI_Voxelize(
@@ -417,13 +434,11 @@ namespace wi::renderer
 		wi::graphics::CommandList cmd
 	);
 	// Resolve VXGI to screen
-	//	fullres : if true it will be in native resolution, otherwise it will use some upsampling from low res
 	void VXGI_Resolve(
 		const VXGIResources& res,
 		const wi::scene::Scene& scene,
 		wi::graphics::Texture texture_lineardepth,
-		wi::graphics::CommandList cmd,
-		bool fullres = false
+		wi::graphics::CommandList cmd
 	);
 
 	void Postprocess_Blur_Gaussian(
@@ -470,6 +485,7 @@ namespace wi::renderer
 		);
 	struct MSAOResources
 	{
+		mutable bool cleared = false;
 		wi::graphics::Texture texture_lineardepth_downsize1;
 		wi::graphics::Texture texture_lineardepth_tiled1;
 		wi::graphics::Texture texture_lineardepth_downsize2;
@@ -588,7 +604,6 @@ namespace wi::renderer
 	);
 	struct RTShadowResources
 	{
-		wi::graphics::Texture temp;
 		wi::graphics::Texture temporal[2];
 		wi::graphics::Texture normals;
 
@@ -610,7 +625,7 @@ namespace wi::renderer
 	);
 	struct ScreenSpaceShadowResources
 	{
-		wi::graphics::Texture lowres;
+		int placeholder = 0;
 	};
 	void CreateScreenSpaceShadowResources(ScreenSpaceShadowResources& res, XMUINT2 resolution);
 	void Postprocess_ScreenSpaceShadow(
@@ -852,6 +867,11 @@ namespace wi::renderer
 		float threshold = 1.0f
 	);
 	void Postprocess_Downsample4x(
+		const wi::graphics::Texture& input,
+		const wi::graphics::Texture& output,
+		wi::graphics::CommandList cmd
+	);
+	void Postprocess_Lineardepth(
 		const wi::graphics::Texture& input,
 		const wi::graphics::Texture& output,
 		wi::graphics::CommandList cmd
@@ -1122,6 +1142,14 @@ namespace wi::renderer
 		uint shape = 0; // 0: circle, 1 : square
 	};
 	void DrawPaintRadius(const PaintRadius& paintrad);
+
+	// Add voxel grid to be drawn in debug rendering phase.
+	//	WARNING: This retains pointer until next call to DrawDebugScene(), so voxel grid must not be destroyed until then!
+	void DrawVoxelGrid(const wi::VoxelGrid* voxelgrid);
+
+	// Add path query to be drawn in debug rendering phase.
+	//	WARNING: This retains pointer until next call to DrawDebugScene(), so path query must not be destroyed until then!
+	void DrawPathQuery(const wi::PathQuery* pathquery);
 
 	// Add a texture that should be mipmapped whenever it is feasible to do so
 	void AddDeferredMIPGen(const wi::graphics::Texture& texture, bool preserve_coverage = false);

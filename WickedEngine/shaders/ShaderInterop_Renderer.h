@@ -72,6 +72,7 @@ static const uint SHADERMATERIAL_OPTION_BIT_DOUBLE_SIDED = 1 << 7;
 static const uint SHADERMATERIAL_OPTION_BIT_TRANSPARENT = 1 << 8;
 static const uint SHADERMATERIAL_OPTION_BIT_ADDITIVE = 1 << 9;
 static const uint SHADERMATERIAL_OPTION_BIT_UNLIT = 1 << 10;
+static const uint SHADERMATERIAL_OPTION_BIT_USE_VERTEXAO = 1 << 11;
 
 // Same as MaterialComponent::TEXTURESLOT
 enum TEXTURESLOT
@@ -90,6 +91,7 @@ enum TEXTURESLOT
 	CLEARCOATNORMALMAP,
 	SPECULARMAP,
 	ANISOTROPYMAP,
+	TRANSPARENCYMAP,
 
 	TEXTURESLOT_COUNT
 };
@@ -397,6 +399,7 @@ struct ShaderMaterial
 #endif // __cplusplus
 
 	inline bool IsUsingVertexColors() { return options & SHADERMATERIAL_OPTION_BIT_USE_VERTEXCOLORS; }
+	inline bool IsUsingVertexAO() { return options & SHADERMATERIAL_OPTION_BIT_USE_VERTEXAO; }
 	inline bool IsUsingSpecularGlossinessWorkflow() { return options & SHADERMATERIAL_OPTION_BIT_SPECULARGLOSSINESS_WORKFLOW; }
 	inline bool IsOcclusionEnabled_Primary() { return options & SHADERMATERIAL_OPTION_BIT_OCCLUSION_PRIMARY; }
 	inline bool IsOcclusionEnabled_Secondary() { return options & SHADERMATERIAL_OPTION_BIT_OCCLUSION_SECONDARY; }
@@ -444,10 +447,10 @@ static const uint SHADERMESH_FLAG_EMITTEDPARTICLE = 1 << 2;
 //	But because these are always loaded toghether by shaders, they are unrolled into one to reduce individual buffer loads
 struct ShaderGeometry
 {
-	int vb_pos_nor_wind;
-	int vb_uvs;
 	int ib;
-	uint indexOffset;
+	int vb_pos_wind;
+	int vb_uvs;
+	int vb_nor;
 
 	int vb_tan;
 	int vb_col;
@@ -464,27 +467,39 @@ struct ShaderGeometry
 	float3 aabb_max;
 	float tessellation_factor;
 
+	float2 uv_range_min;
+	float2 uv_range_max;
+
+	uint indexOffset;
+	uint indexCount;
+	int padding0;
+	int padding1;
+
 	void init()
 	{
 		ib = -1;
-		indexOffset = 0;
-		vb_pos_nor_wind = -1;
+		vb_pos_wind = -1;
 		vb_uvs = -1;
-
+		vb_nor = -1;
 		vb_tan = -1;
 		vb_col = -1;
 		vb_atl = -1;
 		vb_pre = -1;
-
 		materialIndex = 0;
 		meshletOffset = 0;
 		meshletCount = 0;
-		impostorSliceOffset = -1;
 
 		aabb_min = float3(0, 0, 0);
 		flags = 0;
 		aabb_max = float3(0, 0, 0);
 		tessellation_factor = 0;
+
+		uv_range_min = float2(0, 0);
+		uv_range_max = float2(1, 1);
+
+		impostorSliceOffset = -1;
+		indexOffset = 0;
+		indexCount = 0;
 	}
 };
 
@@ -554,6 +569,11 @@ struct ShaderMeshInstance
 	float3 center;
 	float radius;
 
+	int vb_ao;
+	int padding0;
+	int padding1;
+	int padding2;
+
 	ShaderTransform transform;
 	ShaderTransform transformInverseTranspose; // This correctly handles non uniform scaling for normals
 	ShaderTransform transformPrev;
@@ -574,6 +594,7 @@ struct ShaderMeshInstance
 		fadeDistance = 0;
 		center = float3(0, 0, 0);
 		radius = 0;
+		vb_ao = -1;
 		transform.init();
 		transformInverseTranspose.init();
 		transformPrev.init();
@@ -914,8 +935,8 @@ struct FrameCB
 
 	float		cloudShadowFarPlaneKm;
 	int			texture_volumetricclouds_shadow_index;
+	float		gi_boost;
 	int			padding0;
-	int			padding1;
 
 	uint		lightarray_offset;			// indexing into entity array
 	uint		lightarray_count;			// indexing into entity array
@@ -939,8 +960,16 @@ struct FrameCB
 
 	int			texture_cameravolumelut_index;
 	int			texture_wind_index;
+	int			texture_wind_prev_index;
 	int			buffer_entity_index;
-	float		gi_boost;
+
+	float4		rain_blocker_mad;
+	float4x4	rain_blocker_matrix;
+	float4x4	rain_blocker_matrix_inverse;
+
+	float4		rain_blocker_mad_prev;
+	float4x4	rain_blocker_matrix_prev;
+	float4x4	rain_blocker_matrix_inverse_prev;
 
 	ShaderScene scene;
 
@@ -1000,7 +1029,8 @@ struct ShaderCamera
 	uint4 scissor; // scissor in physical coordinates (left,top,right,bottom) range: [0, internal_resolution]
 	float4 scissor_uv; // scissor in screen UV coordinates (left,top,right,bottom) range: [0, 1]
 
-	uint3 entity_culling_tilecount;
+	uint2 entity_culling_tilecount;
+	uint entity_culling_tile_bucket_count_flat; // tilecount.x * tilecount.y * SHADER_ENTITY_TILE_BUCKET_COUNT (the total number of uint buckets for the whole screen)
 	uint sample_count;
 
 	uint2 visibility_tilecount;
@@ -1015,9 +1045,9 @@ struct ShaderCamera
 	int texture_velocity_index;
 	int texture_normal_index;
 	int texture_roughness_index;
-	int buffer_entitytiles_opaque_index;
+	int buffer_entitytiles_index;
 
-	int buffer_entitytiles_transparent_index;
+	int padding;
 	int texture_reflection_index;
 	int texture_reflection_depth_index;
 	int texture_refraction_index;
@@ -1071,6 +1101,7 @@ struct ShaderCamera
 		scissor = {};
 		scissor_uv = {};
 		entity_culling_tilecount = {};
+		entity_culling_tile_bucket_count_flat = 0;
 		sample_count = {};
 		visibility_tilecount = {};
 		visibility_tilecount_flat = {};
@@ -1083,8 +1114,7 @@ struct ShaderCamera
 		texture_velocity_index = -1;
 		texture_normal_index = -1;
 		texture_roughness_index = -1;
-		buffer_entitytiles_opaque_index = -1;
-		buffer_entitytiles_transparent_index = -1;
+		buffer_entitytiles_index = -1;
 		texture_reflection_index = -1;
 		texture_refraction_index = -1;
 		texture_waterriples_index = -1;
@@ -1255,20 +1285,39 @@ CBUFFER(PaintRadiusCB, CBSLOT_RENDERER_MISC)
 
 struct SkinningPushConstants
 {
-	uint vertexCount;
-	int vb_pos_nor_wind;
+	int vb_pos_wind;
+	int vb_nor;
 	int vb_tan;
-	int so_pos_nor_wind;
+	int so_pos;
 
+	int so_nor;
 	int so_tan;
 	int vb_bon;
+	int morphvb_index;
+
 	int skinningbuffer_index;
 	uint bone_offset;
-
 	uint morph_offset;
 	uint morph_count;
-	int morphvb_index;
-	int padding;
+
+	float3 aabb_min;
+	uint vertexCount;
+
+	float3 aabb_max;
+	float padding;
+};
+
+struct DebugObjectPushConstants
+{
+	int vb_pos_wind;
+};
+
+struct LightmapPushConstants
+{
+	int vb_pos_wind;
+	int vb_nor;
+	int vb_atl;
+	uint instanceIndex;
 };
 
 struct MorphTargetGPU

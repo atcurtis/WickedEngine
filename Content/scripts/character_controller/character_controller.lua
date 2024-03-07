@@ -27,6 +27,7 @@ local framerate_lock = false
 local framerate_lock_target = 20
 local slope_threshold = 0.2 -- How much slopeiness will cause character to slide down instead of standing on it
 local gravity = -30
+local dynamic_voxelization = false -- Set to true to revoxelize navigation every frame
 
 local ConversationState = {
 	Disabled = 0,
@@ -57,9 +58,9 @@ local function Conversation()
 
 			-- Update conversation percentage (fade in/out of conversation)
 			if self.state == ConversationState.Disabled then
-				self.percent = math.lerp(self.percent, 0, 0.05)
+				self.percent = math.lerp(self.percent, 0, getDeltaTime() * 4)
 			else
-				self.percent = math.lerp(self.percent, 1, 0.05)
+				self.percent = math.lerp(self.percent, 1, getDeltaTime() * 4)
 			end
 			path.SetCropTop(self.percent * crop_height)
 			path.SetCropBottom(self.percent * crop_height)
@@ -295,6 +296,9 @@ local function LoadAnimations(model_name)
 end
 
 local character_capsules = {}
+local voxelgrid = VoxelGrid(128,32,128)
+voxelgrid.SetVoxelSize(0.25)
+voxelgrid.SetCenter(Vector(0,0.1,0))
 
 local function Character(model_name, start_position, face, controllable, anim_scene)
 	local self = {
@@ -314,12 +318,12 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 		right_toes = INVALID_ENTITY,
 		face = Vector(0,0,1), -- forward direction (smoothed)
 		face_next = Vector(0,0,1), -- forward direction in current frame
-		force = Vector(),
+		movement_velocity = Vector(),
 		velocity = Vector(),
 		savedPointerPos = Vector(),
-		walk_speed = 0.2,
-		jog_speed = 0.4,
-		run_speed = 0.8,
+		walk_speed = 0.1,
+		jog_speed = 0.2,
+		run_speed = 0.4,
 		jump_speed = 8,
 		swim_speed = 0.5,
 		layerMask = ~0, -- layerMask will be used to filter collisions
@@ -335,7 +339,9 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 		foot_placed_right = false,
 		mood = Mood.Neutral,
 		mood_amount = 1,
+		expression = INVALID_ENTITY,
 
+		pathquery = PathQuery(),
 		patrol_waypoints = {},
 		patrol_next = 0,
 		patrol_wait = 0,
@@ -432,7 +438,7 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 		end,
 		
 		Jump = function(self,f)
-			self.force.SetY(f)
+			self.velocity.SetY(f)
 			self.state = States.JUMP
 		end,
 		MoveDirection = function(self,dir)
@@ -456,7 +462,7 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 				elseif self.state == States.SWIM then
 					speed = self.swim_speed
 				end
-				self.force = vector.Add(self.force, self.face:Multiply(Vector(speed,speed,speed)))
+				self.movement_velocity = self.face:Multiply(Vector(speed,speed,speed))
 			end
 		end,
 
@@ -541,6 +547,7 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 			end
 
 			-- swim test:
+			local swimming = false
 			if self.neck ~= INVALID_ENTITY then
 				local neck_pos = scene.Component_GetTransform(self.neck).GetPosition()
 				local water_threshold = 0.1
@@ -550,8 +557,8 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 				if water_entity ~= INVALID_ENTITY then
 					model_transform.Translate(Vector(0,water_distance - water_threshold,0))
 					model_transform.UpdateTransform()
-					self.force.SetY(0)
-					self.force = vector.Multiply(self.force, 0.8) -- water friction
+					self.velocity.SetY(0)
+					swimming = true
 					self.state = States.SWIM_IDLE
 				end
 			end
@@ -612,14 +619,13 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 				local patrol_count = len(self.patrol_waypoints)
 				if patrol_count > 0 then
 					local pos = savedPos
-					pos.SetY(0)
 					local patrol = self.patrol_waypoints[self.patrol_next % patrol_count + 1]
 					local patrol_transform = scene.Component_GetTransform(patrol.entity)
 					if patrol_transform ~= nil then
 						local patrol_pos = patrol_transform.GetPosition()
-						patrol_pos.SetY(0)
 						local patrol_wait = patrol.wait or 0 -- default: 0
 						local patrol_vec = vector.Subtract(patrol_pos, pos)
+						patrol_vec.SetY(0)
 						local distance = patrol_vec.Length()
 						local patrol_dist = patrol.distance or 0.5 -- default : 0.5
 						local patrol_dist_threshold = patrol.distance_threshold or 0 -- default : 0
@@ -643,6 +649,16 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 							end
 						else
 							-- move towards patrol waypoint:
+							self.pathquery.SetAgentHeight(3)
+							self.pathquery.Process(pos, patrol_pos, voxelgrid)
+							if self.pathquery.IsSuccessful() then
+								-- If there is a valid pathfinding result for waypoint, replace heading direction by that:
+								patrol_vec = vector.Subtract(self.pathquery.GetNextWaypoint(), pos)
+								patrol_vec.SetY(0)
+							end
+							if debug then
+								DrawPathQuery(self.pathquery)
+							end
 							self.patrol_wait = 0
 							-- check if it's blocked by player collision:
 							local capsule = scene.Component_GetCollider(self.collider).GetCapsule()
@@ -687,8 +703,6 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 				end
 				
 			end
-
-			self.velocity = self.force
 			
 			-- Capsule collision for character:
 			local capsule = scene.Component_GetCollider(self.collider).GetCapsule()
@@ -704,7 +718,6 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 				collision_layer = collision_layer & ~Layers.Player
 			end
 			local current_anim = scene.Component_GetAnimation(self.anims[self.state])
-			local ground_intersect = false
 			local platform_velocity_accumulation = Vector()
 			local platform_velocity_count = 0
 
@@ -712,12 +725,20 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 			self.fixed_update_remain = self.fixed_update_remain + dt
 			local fixed_update_fps = 120
 			local fixed_dt = 1.0 / fixed_update_fps
-			self.timestep_occured = false;
+			self.timestep_occured = false
 
 			while self.fixed_update_remain >= fixed_dt do
 				self.timestep_occured = true;
 				self.fixed_update_remain = self.fixed_update_remain - fixed_dt
 				
+				if swimming then
+					self.velocity = vector.Multiply(self.velocity, 0.8) -- water friction
+				end
+				if self.velocity.GetY() > -30 then
+					self.velocity = vector.Add(self.velocity, Vector(0, gravity * fixed_dt, 0)) -- gravity
+				end
+				self.velocity = vector.Add(self.velocity, self.movement_velocity)
+
 				capsulepos = vector.Add(capsulepos, vector.Multiply(self.velocity, fixed_dt))
 				capsule = Capsule(capsulepos, vector.Add(capsulepos, Vector(0, capsuleheight)), radius)
 				local o2, p2, n2, depth, platform_velocity = scene.Intersects(capsule, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, collision_layer) -- scene/capsule collision
@@ -732,22 +753,27 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 
 					if ground_slope > slope_threshold then
 						-- Ground intersection:
-						ground_intersect = true
+						self.velocity = vector.Multiply(self.velocity, 0.92) -- ground friction
 						capsulepos = vector.Add(capsulepos, Vector(0, depth, 0)) -- avoid sliding, instead stand upright
 						platform_velocity_accumulation = vector.Add(platform_velocity_accumulation, platform_velocity)
 						platform_velocity_count = platform_velocity_count + 1
-						self.velocity.SetY(0) -- remove falling motion
+						self.velocity.SetY(0)
 					else
 						-- Slide on contact surface:
+						local velocityLen = self.velocity.Length()
+						local velocityNormalized = self.velocity.Normalize()
+						local undesiredMotion = n2:Multiply(vector.Dot(velocityNormalized, n2))
+						local desiredMotion = vector.Subtract(velocityNormalized, undesiredMotion)
+						self.velocity = vector.Multiply(desiredMotion, velocityLen)
 						capsulepos = vector.Add(capsulepos, vector.Multiply(n2, depth))
 					end
 				end
 				
 				-- Some other things also updated at fixed rate:
 				self.face = vector.Lerp(self.face, self.face_next, 0.1) -- smooth the turning in fixed update
-				if self.force.Length() < 30 then
-					self.force = vector.Add(self.force, Vector(0, gravity * fixed_dt, 0)) -- gravity
-				end
+				self.face.SetY(0)
+				self.face = self.face.Normalize()
+
 				-- Animation blending
 				if current_anim ~= nil then
 					-- Blend in current animation:
@@ -773,18 +799,14 @@ local function Character(model_name, start_position, face, controllable, anim_sc
 
 			model_transform.Translate(vector.Subtract(capsulepos, original_capsulepos)) -- transform by the capsule offset
 			model_transform.UpdateTransform()
-			
-			self.face.SetY(0)
-			self.face = self.face.Normalize()
-			if ground_intersect then
-				self.force = vector.Multiply(self.force, 0.85) -- ground friction
-			end
+
+			self.movement_velocity = Vector()
 			
 			-- try to put water ripple:
 			if self.velocity.Length() > 0.01 and self.state ~= States.SWIM_IDLE then
 				local w,wp = scene.Intersects(capsule, FILTER_WATER)
 				if w ~= INVALID_ENTITY then
-					PutWaterRipple(script_dir() .. "assets/ripple.png", wp)
+					PutWaterRipple(wp)
 				end
 			end
 
@@ -1061,7 +1083,7 @@ local function ThirdPersonCamera(character)
 			local character_position = character_transform.GetPosition()
 			self.target_rot_horizontal = math.lerp(self.target_rot_horizontal, self.character.target_rot_horizontal, 0.1)
 			self.target_rot_vertical = math.lerp(self.target_rot_vertical, self.character.target_rot_vertical, 0.1)
-			self.target_height = math.lerp(self.target_height, character_position.GetY() + self.character.target_height, 0.05)
+			self.target_height = math.lerp(self.target_height, character_position.GetY() + self.character.target_height, 0.1)
 
 			local camera_transform = scene.Component_GetTransform(self.camera)
 			local target_transform = TransformComponent()
@@ -1151,6 +1173,8 @@ LoadModel(script_dir() .. "assets/level.wiscene")
 --LoadModel(script_dir() .. "assets/waypoints.wiscene", matrix.Translation(Vector(1,0,2)))
 --dofile(script_dir() .. "../dungeon_generator/dungeon_generator.lua")
 
+scene.VoxelizeScene(voxelgrid, false, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~(Layers.Player | Layers.NPC)) -- player and npc layers not included in voxelization
+
 local anim_scene = LoadAnimations(script_dir() .. "assets/animations.wiscene")
 
 local player = Character(script_dir() .. "assets/character.wiscene", Vector(0,0.5,0), Vector(0,0,1), true, anim_scene)
@@ -1231,6 +1255,11 @@ runProcess(function()
 
 		if not conversation.override_input then
 			camera:Update()
+		end
+
+		if dynamic_voxelization then
+			voxelgrid.ClearData()
+			scene.VoxelizeScene(voxelgrid, false, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~(Layers.Player | Layers.NPC)) -- player and npc layers not included in voxelization
 		end
 
 		update()
@@ -1327,8 +1356,9 @@ runProcess(function()
 
 			local str = "State: " .. player.state .. "\n"
 			--str = str .. "Velocity = " .. player.velocity.GetX() .. ", " .. player.velocity.GetY() .. "," .. player.velocity.GetZ() .. "\n"
-			--str = str .. "Force = " .. player.force.GetX() .. ", " .. player.force.GetY() .. "," .. player.force.GetZ() .. "\n"
 			DrawDebugText(str, vector.Add(capsule.GetBase(), Vector(0,0.4)), Vector(1,1,1,1), 1, DEBUG_TEXT_CAMERA_FACING | DEBUG_TEXT_CAMERA_SCALING)
+
+			DrawVoxelGrid(voxelgrid)
 
 		end
 

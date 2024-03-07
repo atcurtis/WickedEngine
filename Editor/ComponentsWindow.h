@@ -27,6 +27,9 @@
 #include "ArmatureWindow.h"
 #include "HumanoidWindow.h"
 #include "TerrainWindow.h"
+#include "SpriteWindow.h"
+#include "FontWindow.h"
+#include "VoxelGridWindow.h"
 
 class EditorComponent;
 
@@ -68,4 +71,7 @@ public:
 	ArmatureWindow armatureWnd;
 	HumanoidWindow humanoidWnd;
 	TerrainWindow terrainWnd;
+	SpriteWindow spriteWnd;
+	FontWindow fontWnd;
+	VoxelGridWindow voxelGridWnd;
 };

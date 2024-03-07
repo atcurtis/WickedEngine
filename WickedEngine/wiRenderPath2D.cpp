@@ -8,6 +8,15 @@ using namespace wi::graphics;
 
 namespace wi
 {
+	void RenderPath2D::DeleteGPUResources()
+	{
+		current_buffersize = {};
+		current_layoutscale = 0; // invalidate layout
+
+		rtFinal = {};
+		rtStenciled = {};
+		rtStenciled_resolved = {};
+	}
 
 	void RenderPath2D::ResizeBuffers()
 	{
@@ -147,10 +156,7 @@ namespace wi
 					RenderPassImage::DepthStencil(
 						dsv,
 						RenderPassImage::LoadOp::LOAD,
-						RenderPassImage::StoreOp::STORE,
-						ResourceState::DEPTHSTENCIL_READONLY,
-						ResourceState::DEPTHSTENCIL_READONLY,
-						ResourceState::DEPTHSTENCIL_READONLY
+						RenderPassImage::StoreOp::STORE
 					),
 					RenderPassImage::Resolve(&rtStenciled_resolved)
 				};
@@ -163,10 +169,7 @@ namespace wi
 					RenderPassImage::DepthStencil(
 						dsv,
 						RenderPassImage::LoadOp::LOAD,
-						RenderPassImage::StoreOp::STORE,
-						ResourceState::DEPTHSTENCIL_READONLY,
-						ResourceState::DEPTHSTENCIL_READONLY,
-						ResourceState::DEPTHSTENCIL_READONLY
+						RenderPassImage::StoreOp::STORE
 					),
 				};
 				device->RenderPassBegin(rp, arraysize(rp), cmd);
@@ -203,10 +206,7 @@ namespace wi
 				RenderPassImage::DepthStencil(
 					dsv,
 					RenderPassImage::LoadOp::LOAD,
-					RenderPassImage::StoreOp::STORE,
-					ResourceState::DEPTHSTENCIL_READONLY,
-					ResourceState::DEPTHSTENCIL_READONLY,
-					ResourceState::DEPTHSTENCIL_READONLY
+					RenderPassImage::StoreOp::STORE
 				),
 			};
 			device->RenderPassBegin(rp, arraysize(rp), cmd);

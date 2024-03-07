@@ -14,6 +14,8 @@ namespace wi
 
 	void RenderPath3D::DeleteGPUResources()
 	{
+		RenderPath2D::DeleteGPUResources();
+
 		rtMain = {};
 		rtMain_render = {};
 		rtPrimitiveID = {};
@@ -117,7 +119,11 @@ namespace wi
 		{
 			TextureDesc desc;
 			desc.format = wi::renderer::format_idbuffer;
-			desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
+			desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
+			if (getMSAASampleCount() > 1)
+			{
+				desc.bind_flags |= BindFlag::UNORDERED_ACCESS;
+			}
 			desc.width = internalResolution.x;
 			desc.height = internalResolution.y;
 			desc.sample_count = 1;
@@ -358,6 +364,10 @@ namespace wi
 		visibility_main.scene = scene;
 		visibility_main.camera = camera;
 		visibility_main.flags = wi::renderer::Visibility::ALLOW_EVERYTHING;
+		if (!getOcclusionCullingEnabled())
+		{
+			visibility_main.flags &= ~wi::renderer::Visibility::ALLOW_OCCLUSION_CULLING;
+		}
 		wi::renderer::UpdateVisibility(visibility_main);
 
 		if (visibility_main.planar_reflection_visible)
@@ -374,7 +384,7 @@ namespace wi
 				wi::renderer::Visibility::ALLOW_EMITTERS |
 				wi::renderer::Visibility::ALLOW_HAIRS |
 				wi::renderer::Visibility::ALLOW_LIGHTS
-			;
+				;
 			wi::renderer::UpdateVisibility(visibility_reflection);
 		}
 
@@ -631,8 +641,7 @@ namespace wi
 		camera->texture_velocity_index = device->GetDescriptorIndex(&rtVelocity, SubresourceType::SRV);
 		camera->texture_normal_index = device->GetDescriptorIndex(&visibilityResources.texture_normals, SubresourceType::SRV);
 		camera->texture_roughness_index = device->GetDescriptorIndex(&visibilityResources.texture_roughness, SubresourceType::SRV);
-		camera->buffer_entitytiles_opaque_index = device->GetDescriptorIndex(&tiledLightResources.entityTiles_Opaque, SubresourceType::SRV);
-		camera->buffer_entitytiles_transparent_index = device->GetDescriptorIndex(&tiledLightResources.entityTiles_Transparent, SubresourceType::SRV);
+		camera->buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources.entityTiles, SubresourceType::SRV);
 		camera->texture_reflection_index = device->GetDescriptorIndex(&rtReflection, SubresourceType::SRV);
 		camera->texture_reflection_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
 		camera->texture_refraction_index = device->GetDescriptorIndex(&rtSceneCopy, SubresourceType::SRV);
@@ -642,10 +651,10 @@ namespace wi
 		camera->texture_rtshadow_index = device->GetDescriptorIndex(&rtShadow, SubresourceType::SRV);
 		camera->texture_rtdiffuse_index = device->GetDescriptorIndex(&rtRaytracedDiffuse, SubresourceType::SRV);
 		camera->texture_surfelgi_index = device->GetDescriptorIndex(&surfelGIResources.result, SubresourceType::SRV);
-		camera->texture_vxgi_diffuse_index = device->GetDescriptorIndex(&vxgiResources.diffuse[0], SubresourceType::SRV);
+		camera->texture_vxgi_diffuse_index = device->GetDescriptorIndex(&vxgiResources.diffuse, SubresourceType::SRV);
 		if (wi::renderer::GetVXGIReflectionsEnabled())
 		{
-			camera->texture_vxgi_specular_index = device->GetDescriptorIndex(&vxgiResources.specular[0], SubresourceType::SRV);
+			camera->texture_vxgi_specular_index = device->GetDescriptorIndex(&vxgiResources.specular, SubresourceType::SRV);
 		}
 		else
 		{
@@ -666,8 +675,7 @@ namespace wi
 		camera_reflection.texture_velocity_index = -1;
 		camera_reflection.texture_normal_index = -1;
 		camera_reflection.texture_roughness_index = -1;
-		camera_reflection.buffer_entitytiles_opaque_index = device->GetDescriptorIndex(&tiledLightResources_planarReflection.entityTiles_Opaque, SubresourceType::SRV);
-		camera_reflection.buffer_entitytiles_transparent_index = device->GetDescriptorIndex(&tiledLightResources_planarReflection.entityTiles_Transparent, SubresourceType::SRV);
+		camera_reflection.buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources_planarReflection.entityTiles, SubresourceType::SRV);
 		camera_reflection.texture_reflection_index = -1;
 		camera_reflection.texture_reflection_depth_index = -1;
 		camera_reflection.texture_refraction_index = -1;
@@ -681,7 +689,7 @@ namespace wi
 		camera_reflection.texture_vxgi_specular_index = -1;
 
 		video_cmd = {};
-		if (scene->videos.GetCount() > 0)
+		if (getSceneUpdateEnabled() && scene->videos.GetCount() > 0)
 		{
 			for (size_t i = 0; i < scene->videos.GetCount(); ++i)
 			{
@@ -782,7 +790,7 @@ namespace wi
 				);
 			}
 
-			if (wi::renderer::GetDDGIEnabled())
+			if (wi::renderer::GetDDGIEnabled() && getSceneUpdateEnabled())
 			{
 				wi::renderer::DDGI(
 					*scene,
@@ -799,7 +807,7 @@ namespace wi
 			wi::renderer::DRAWSCENE_TESSELLATION |
 			wi::renderer::DRAWSCENE_OCCLUSIONCULLING |
 			wi::renderer::DRAWSCENE_MAINCAMERA
-		;
+			;
 
 		// Main camera depth prepass + occlusion culling:
 		cmd = device->BeginCommandList();
@@ -815,7 +823,12 @@ namespace wi
 				cmd
 			);
 
-			wi::renderer::OcclusionCulling_Reset(visibility_main, cmd); // must be outside renderpass!
+			if (getOcclusionCullingEnabled())
+			{
+				wi::renderer::OcclusionCulling_Reset(visibility_main, cmd); // must be outside renderpass!
+			}
+
+			wi::renderer::RefreshImpostors(*scene, cmd);
 
 			RenderPassImage rp[] = {
 				RenderPassImage::DepthStencil(
@@ -880,7 +893,10 @@ namespace wi
 
 			device->RenderPassEnd(cmd);
 
-			wi::renderer::OcclusionCulling_Resolve(visibility_main, cmd); // must be outside renderpass!
+			if (getOcclusionCullingEnabled())
+			{
+				wi::renderer::OcclusionCulling_Resolve(visibility_main, cmd); // must be outside renderpass!
+			}
 
 			});
 
@@ -919,6 +935,7 @@ namespace wi
 
 			wi::renderer::ComputeTiledLightCulling(
 				tiledLightResources,
+				visibility_main,
 				debugUAV,
 				cmd
 			);
@@ -983,7 +1000,7 @@ namespace wi
 			{
 				wi::renderer::Postprocess_ScreenSpaceShadow(
 					screenspaceshadowResources,
-					tiledLightResources.entityTiles_Opaque,
+					tiledLightResources.entityTiles,
 					rtLinearDepth,
 					rtShadow,
 					cmd,
@@ -997,7 +1014,7 @@ namespace wi
 				wi::renderer::Postprocess_RTShadow(
 					rtshadowResources,
 					*scene,
-					tiledLightResources.entityTiles_Opaque,
+					tiledLightResources.entityTiles,
 					rtLinearDepth,
 					rtShadow,
 					cmd
@@ -1015,7 +1032,7 @@ namespace wi
 				});
 		}
 
-		if (wi::renderer::GetVXGIEnabled())
+		if (wi::renderer::GetVXGIEnabled() && getSceneUpdateEnabled())
 		{
 			cmd = device->BeginCommandList();
 			wi::jobsystem::Execute(ctx, [cmd, this](wi::jobsystem::JobArgs args) {
@@ -1024,20 +1041,22 @@ namespace wi
 		}
 
 		// Updating textures:
-		cmd = device->BeginCommandList();
-		device->WaitCommandList(cmd, cmd_prepareframe_async);
-		wi::jobsystem::Execute(ctx, [cmd, this](wi::jobsystem::JobArgs args) {
-			wi::renderer::BindCommonResources(cmd);
-			wi::renderer::BindCameraCB(
-				*camera,
-				camera_previous,
-				camera_reflection,
-				cmd
-			);
-			wi::renderer::RefreshLightmaps(*scene, cmd);
-			wi::renderer::RefreshEnvProbes(visibility_main, cmd);
-			wi::renderer::RefreshImpostors(*scene, cmd);
-		});
+		if (getSceneUpdateEnabled())
+		{
+			cmd = device->BeginCommandList();
+			device->WaitCommandList(cmd, cmd_prepareframe_async);
+			wi::jobsystem::Execute(ctx, [cmd, this](wi::jobsystem::JobArgs args) {
+				wi::renderer::BindCommonResources(cmd);
+				wi::renderer::BindCameraCB(
+					*camera,
+					camera_previous,
+					camera_reflection,
+					cmd
+				);
+				wi::renderer::RefreshLightmaps(*scene, cmd);
+				wi::renderer::RefreshEnvProbes(visibility_main, cmd);
+			});
+		}
 
 		if (visibility_main.IsRequestedPlanarReflections())
 		{
@@ -1089,7 +1108,7 @@ namespace wi
 
 				wi::renderer::DrawScene(
 					visibility_reflection,
-					RENDERPASS_PREPASS,
+					RENDERPASS_PREPASS_DEPTHONLY,
 					cmd,
 					wi::renderer::DRAWSCENE_OPAQUE |
 					wi::renderer::DRAWSCENE_IMPOSTOR |
@@ -1127,6 +1146,7 @@ namespace wi
 
 				wi::renderer::ComputeTiledLightCulling(
 					tiledLightResources_planarReflection,
+					visibility_reflection,
 					Texture(),
 					cmd
 				);
@@ -1214,6 +1234,7 @@ namespace wi
 				}
 
 				wi::renderer::DrawSoftParticles(visibility_reflection, false, cmd);
+				wi::renderer::DrawSpritesAndFonts(*scene, camera_reflection, false, cmd);
 
 				device->RenderPassEnd(cmd);
 
@@ -1275,8 +1296,7 @@ namespace wi
 					vxgiResources,
 					*scene,
 					rtLinearDepth,
-					cmd,
-					getVXGIResolveFullResolutionEnabled()
+					cmd
 				);
 			}
 			if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
@@ -1864,9 +1884,8 @@ namespace wi
 				RENDERPASS_MAIN,
 				cmd,
 				wi::renderer::DRAWSCENE_TRANSPARENT |
-				wi::renderer::DRAWSCENE_OCCLUSIONCULLING |
-				wi::renderer::DRAWSCENE_HAIRPARTICLE |
 				wi::renderer::DRAWSCENE_TESSELLATION |
+				wi::renderer::DRAWSCENE_OCCLUSIONCULLING |
 				wi::renderer::DRAWSCENE_OCEAN |
 				wi::renderer::DRAWSCENE_MAINCAMERA
 			);
@@ -1875,9 +1894,12 @@ namespace wi
 			wi::profiler::EndRange(range); // Transparent Scene
 		}
 
+		wi::renderer::DrawDebugWorld(*scene, *camera, *this, cmd);
+
 		wi::renderer::DrawLightVisualizers(visibility_main, cmd);
 
 		wi::renderer::DrawSoftParticles(visibility_main, false, cmd);
+		wi::renderer::DrawSpritesAndFonts(*scene, *camera, false, cmd);
 
 		if (getVolumeLightsEnabled() && visibility_main.IsRequestedVolumetricLights())
 		{
@@ -1912,8 +1934,6 @@ namespace wi
 				scene->weather.IsVolumetricClouds() ? &volumetriccloudResources.texture_cloudMask : nullptr
 			);
 		}
-
-		wi::renderer::DrawDebugWorld(*scene, *camera, *this, cmd);
 
 		device->RenderPassEnd(cmd);
 
@@ -1957,6 +1977,7 @@ namespace wi
 			device->BindViewports(1, &vp, cmd);
 
 			wi::renderer::DrawSoftParticles(visibility_main, true, cmd);
+			wi::renderer::DrawSpritesAndFonts(*scene, *camera, true, cmd);
 
 			device->RenderPassEnd(cmd);
 		}
@@ -2039,7 +2060,7 @@ namespace wi
 				}
 			}
 
-			if (getDepthOfFieldEnabled() && camera->aperture_size > 0 && getDepthOfFieldStrength() > 0 && depthoffieldResources.IsValid())
+			if (getDepthOfFieldEnabled() && camera->aperture_size > 0.001f && getDepthOfFieldStrength() > 0.001f && depthoffieldResources.IsValid())
 			{
 				wi::renderer::Postprocess_DepthOfField(
 					depthoffieldResources,

@@ -281,9 +281,9 @@ inline ShaderMaterial load_material(uint materialIndex)
 uint load_entitytile(uint tileIndex)
 {
 #ifdef TRANSPARENT
-	return bindless_structured_uint[GetCamera().buffer_entitytiles_transparent_index][tileIndex];
+	return bindless_structured_uint[GetCamera().buffer_entitytiles_index][GetCamera().entity_culling_tile_bucket_count_flat + tileIndex];
 #else
-	return bindless_structured_uint[GetCamera().buffer_entitytiles_opaque_index][tileIndex];
+	return bindless_structured_uint[GetCamera().buffer_entitytiles_index][tileIndex];
 #endif // TRANSPARENT
 }
 inline ShaderEntity load_entity(uint entityIndex)
@@ -353,6 +353,7 @@ struct PrimitiveID
 #define texture_skyluminancelut bindless_textures[GetFrame().texture_skyluminancelut_index]
 #define texture_cameravolumelut bindless_textures3D[GetFrame().texture_cameravolumelut_index]
 #define texture_wind bindless_textures3D[GetFrame().texture_wind_index]
+#define texture_wind_prev bindless_textures3D[GetFrame().texture_wind_prev_index]
 #define scene_acceleration_structure bindless_accelerationstructures[GetScene().TLAS]
 
 #define texture_depth bindless_textures_float[GetCamera().texture_depth_index]
@@ -434,6 +435,12 @@ inline float3 clipspace_to_uv(in float3 clipspace)
 	return clipspace * float3(0.5, -0.5, 0.5) + 0.5;
 }
 
+template<typename T>
+T inverse_lerp(T value1, T value2, T pos)
+{
+	return all(value2 == value1) ? 0 : ((pos - value1) / (value2 - value1));
+}
+
 inline float3 GetSunColor() { return GetWeather().sun_color; } // sun color with intensity applied
 inline float3 GetSunDirection() { return GetWeather().sun_direction; }
 inline float3 GetHorizonColor() { return GetWeather().horizon.rgb; }
@@ -441,6 +448,7 @@ inline float3 GetZenithColor() { return GetWeather().zenith.rgb; }
 inline float3 GetAmbientColor() { return GetWeather().ambient.rgb; }
 inline uint2 GetInternalResolution() { return GetCamera().internal_resolution; }
 inline float GetTime() { return GetFrame().time; }
+inline float GetTimePrev() { return GetFrame().time_previous; }
 inline uint2 GetTemporalAASampleRotation() { return uint2((GetFrame().temporalaa_samplerotation >> 0u) & 0x000000FF, (GetFrame().temporalaa_samplerotation >> 8) & 0x000000FF); }
 inline bool IsStaticSky() { return GetScene().globalenvmap >= 0; }
 
@@ -598,6 +606,38 @@ float noise_gradient_3D(in float3 p)
 			dot(hash_gradient_3D(i + float3(1.0, 0.0, 1.0)), f - float3(1.0, 0.0, 1.0)), u.x),
 			lerp(dot(hash_gradient_3D(i + float3(0.0, 1.0, 1.0)), f - float3(0.0, 1.0, 1.0)),
 				dot(hash_gradient_3D(i + float3(1.0, 1.0, 1.0)), f - float3(1.0, 1.0, 1.0)), u.x), u.y), u.z);
+}
+
+
+// Based on: https://www.shadertoy.com/view/MslGD8
+float2 hash_voronoi(float2 p)
+{
+    //p = mod(p, 4.0); // tile
+	p = float2(dot(p, float2(127.1, 311.7)),
+             dot(p, float2(269.5, 183.3)));
+	return frac(sin(p) * 18.5453);
+}
+
+// return distance, and cell id
+float2 noise_voronoi(in float2 x, in float seed)
+{
+	float2 n = floor(x);
+	float2 f = frac(x);
+
+	float3 m = 8.0;
+	for (int j = -1; j <= 1; j++)
+		for (int i = -1; i <= 1; i++)
+		{
+			float2 g = float2(float(i), float(j));
+			float2 o = hash_voronoi(n + g);
+			//float2  r = g - f + o;
+			float2 r = g - f + (0.5 + 0.5 * sin(seed + 6.2831 * o));
+			float d = dot(r, r);
+			if (d < m.x)
+				m = float3(d, o);
+		}
+
+	return float2(sqrt(m.x), m.y + m.z);
 }
 
 // https://www.shadertoy.com/view/llGSzw
@@ -1405,12 +1445,24 @@ RayCone pixel_ray_cone_from_image_height(float image_height)
 }
 
 
-float3 compute_wind(float3 position, float weight)
+float3 sample_wind(float3 position, float weight)
 {
 	[branch]
 	if (weight > 0)
 	{
 		return texture_wind.SampleLevel(sampler_linear_mirror, position, 0).r * GetWeather().wind.direction * weight;
+	}
+	else
+	{
+		return 0;
+	}
+}
+float3 sample_wind_prev(float3 position, float weight)
+{
+	[branch]
+	if (weight > 0)
+	{
+		return texture_wind_prev.SampleLevel(sampler_linear_mirror, position, 0).r * GetWeather().wind.direction * weight;
 	}
 	else
 	{

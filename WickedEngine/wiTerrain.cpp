@@ -750,6 +750,7 @@ namespace wi::terrain
 					material.SetReflectance(1);
 
 					MeshComponent& mesh = generator->scene.meshes.Create(chunk_data.entity);
+					mesh.SetQuantizedPositionsDisabled(true); // connecting meshes quantization is not correct because mismatching AABBs
 					object.meshID = chunk_data.entity;
 					mesh.indices = chunk_indices().indices;
 					for (auto& lod : chunk_indices().lods)
@@ -848,7 +849,7 @@ namespace wi::terrain
 						});
 					wi::jobsystem::Wait(ctx); // wait until chunk's vertex buffer is fully generated
 
-					material.SetCastShadow(slope_cast_shadow.load());
+					object.SetCastShadow(slope_cast_shadow.load());
 					mesh.SetDoubleSidedShadow(slope_cast_shadow.load());
 
 					wi::jobsystem::Execute(ctx, [&](wi::jobsystem::JobArgs args) {
@@ -1637,11 +1638,17 @@ namespace wi::terrain
 	{
 		Generation_Cancel();
 
+		// Note: separate component types serialized within terrain must NOT use the version of the terrain, but their own!
+		const uint64_t terrain_version = seri.GetVersion();
+		const uint64_t grass_version = seri.componentlibrary->entries["wi::scene::Scene::hairs"].version;
+		const uint64_t material_version = seri.componentlibrary->entries["wi::scene::Scene::materials"].version;
+		const uint64_t weather_version = seri.componentlibrary->entries["wi::scene::Scene::weathers"].version;
+
 		if (archive.IsReadMode())
 		{
 			archive >> _flags;
 			archive >> lod_multiplier;
-			if (seri.GetVersion() < 3)
+			if (terrain_version < 3)
 			{
 				float texlod;
 				archive >> texlod;
@@ -1756,7 +1763,11 @@ namespace wi::terrain
 				SerializeEntity(archive, chunk_data.grass_entity, seri);
 				SerializeEntity(archive, chunk_data.props_entity, seri);
 				archive >> chunk_data.prop_density_current;
+
+				seri.version = grass_version;
 				chunk_data.grass.Serialize(archive, seri);
+				seri.version = terrain_version;
+
 				archive >> chunk_data.grass_density_current;
 				archive >> chunk_data.region_weights;
 				archive >> chunk_data.sphere.center;
@@ -1879,7 +1890,11 @@ namespace wi::terrain
 				SerializeEntity(archive, chunk_data.grass_entity, seri);
 				SerializeEntity(archive, chunk_data.props_entity, seri);
 				archive << chunk_data.prop_density_current;
+
+				seri.version = grass_version;
 				chunk_data.grass.Serialize(archive, seri);
+				seri.version = terrain_version;
+
 				archive << chunk_data.grass_density_current;
 				archive << chunk_data.region_weights;
 				archive << chunk_data.sphere.center;
@@ -1921,13 +1936,21 @@ namespace wi::terrain
 			}
 		}
 
+		// Caution: seri.version changes must be handled carefully!
+		seri.version = material_version;
 		material_Base.Serialize(archive, seri);
 		material_Slope.Serialize(archive, seri);
 		material_LowAltitude.Serialize(archive, seri);
 		material_HighAltitude.Serialize(archive, seri);
 		material_GrassParticle.Serialize(archive, seri);
+
+		seri.version = weather_version;
 		weather.Serialize(archive, seri);
+
+		seri.version = grass_version;
 		grass_properties.Serialize(archive, seri);
+		seri.version = terrain_version;
+
 		perlin_noise.Serialize(archive);
 	}
 

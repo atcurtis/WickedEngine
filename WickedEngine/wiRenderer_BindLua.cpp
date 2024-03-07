@@ -9,6 +9,8 @@
 #include "wiHairParticle.h"
 #include "wiPrimitive_BindLua.h"
 #include "wiEventHandler.h"
+#include "wiVoxelGrid_BindLua.h"
+#include "wiPathQuery_BindLua.h"
 
 using namespace wi::ecs;
 using namespace wi::graphics;
@@ -104,12 +106,81 @@ namespace wi::lua::renderer
 		}
 		return 0;
 	}
+	int SetDebugEnvProbesEnabled(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			wi::renderer::SetToDrawDebugEnvProbes(wi::lua::SGetBool(L, 1));
+		}
+		else
+		{
+			wi::lua::SError(L, "SetDebugEnvProbesEnabled(bool enabled) not enough arguments!");
+		}
+		return 0;
+	}
 	int SetDebugForceFieldsEnabled(lua_State* L)
 	{
 		int argc = wi::lua::SGetArgCount(L);
 		if (argc > 0)
 		{
 			wi::renderer::SetToDrawDebugForceFields(wi::lua::SGetBool(L, 1));
+		}
+		else
+		{
+			wi::lua::SError(L, "SetDebugForceFieldsEnabled(bool enabled) not enough arguments!");
+		}
+		return 0;
+	}
+	int SetDebugCamerasEnabled(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			wi::renderer::SetToDrawDebugCameras(wi::lua::SGetBool(L, 1));
+		}
+		else
+		{
+			wi::lua::SError(L, "SetDebugCamerasEnabled(bool enabled) not enough arguments!");
+		}
+		return 0;
+	}
+	int SetDebugCollidersEnabled(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			wi::renderer::SetToDrawDebugColliders(wi::lua::SGetBool(L, 1));
+		}
+		else
+		{
+			wi::lua::SError(L, "SetDebugCollidersEnabled(bool enabled) not enough arguments!");
+		}
+		return 0;
+	}
+	int SetGridHelperEnabled(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			wi::renderer::SetToDrawGridHelper(wi::lua::SGetBool(L, 1));
+		}
+		else
+		{
+			wi::lua::SError(L, "SetGridHelperEnabled(bool enabled) not enough arguments!");
+		}
+		return 0;
+	}
+	int SetDDGIDebugEnabled(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			wi::renderer::SetDDGIDebugEnabled(wi::lua::SGetBool(L, 1));
+		}
+		else
+		{
+			wi::lua::SError(L, "SetDDGIDebugEnabled(bool enabled) not enough arguments!");
 		}
 		return 0;
 	}
@@ -352,6 +423,43 @@ namespace wi::lua::renderer
 
 		return 0;
 	}
+	int DrawVoxelGrid(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			VoxelGrid_BindLua* a = Luna<VoxelGrid_BindLua>::lightcheck(L, 1);
+			if (a)
+			{
+				wi::renderer::DrawVoxelGrid(a->voxelgrid);
+			}
+			else
+				wi::lua::SError(L, "DrawVoxelGrid(VoxelGrid voxelgrid) first argument must be a VoxelGrid type!");
+		}
+		else
+			wi::lua::SError(L, "DrawVoxelGrid(VoxelGrid voxelgrid) not enough arguments!");
+
+		return 0;
+	}
+	int DrawPathQuery(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc > 0)
+		{
+			PathQuery_BindLua* a = Luna<PathQuery_BindLua>::lightcheck(L, 1);
+			if (a)
+			{
+				wi::renderer::DrawPathQuery(&a->pathquery);
+			}
+			else
+				wi::lua::SError(L, "DrawPathQuery(PathQuery pathquery) first argument must be a PathQuery type!");
+		}
+		else
+			wi::lua::SError(L, "DrawPathQuery(PathQuery pathquery) not enough arguments!");
+
+		return 0;
+	}
+
 	int PutWaterRipple(lua_State* L)
 	{
 		int argc = wi::lua::SGetArgCount(L);
@@ -361,15 +469,26 @@ namespace wi::lua::renderer
 			Vector_BindLua* v = Luna<Vector_BindLua>::lightcheck(L, 2);
 			if (v)
 			{
-				XMFLOAT3 pos;
-				XMStoreFloat3(&pos, XMLoadFloat4(&v->data));
-				GetGlobalScene()->PutWaterRipple(name, pos);
+				GetGlobalScene()->PutWaterRipple(name, v->GetFloat3());
 			}
 			else
-				wi::lua::SError(L, "PutWaterRipple(String imagename, Vector position) argument is not a Vector!");
+				wi::lua::SError(L, "PutWaterRipple(string imagename, Vector position) argument is not a Vector!");
+		}
+		else if (argc > 0)
+		{
+			Vector_BindLua* v = Luna<Vector_BindLua>::lightcheck(L, 1);
+			if (v)
+			{
+				GetGlobalScene()->PutWaterRipple(v->GetFloat3());
+			}
+			else
+				wi::lua::SError(L, "PutWaterRipple(Vector position) argument is not a Vector!");
 		}
 		else
-			wi::lua::SError(L, "PutWaterRipple(String imagename, Vector position) not enough arguments!");
+		{
+			wi::lua::SError(L, "PutWaterRipple(Vector position) not enough arguments!");
+			wi::lua::SError(L, "PutWaterRipple(string imagename, Vector position) not enough arguments!");
+		}
 		return 0;
 	}
 
@@ -409,7 +528,12 @@ namespace wi::lua::renderer
 			wi::lua::RegisterFunc("SetDebugPartitionTreeEnabled", SetDebugPartitionTreeEnabled);
 			wi::lua::RegisterFunc("SetDebugBonesEnabled", SetDebugBonesEnabled);
 			wi::lua::RegisterFunc("SetDebugEmittersEnabled", SetDebugEmittersEnabled);
+			wi::lua::RegisterFunc("SetDebugEnvProbesEnabled", SetDebugEnvProbesEnabled);
 			wi::lua::RegisterFunc("SetDebugForceFieldsEnabled", SetDebugForceFieldsEnabled);
+			wi::lua::RegisterFunc("SetDebugCamerasEnabled", SetDebugCamerasEnabled);
+			wi::lua::RegisterFunc("SetDebugCollidersEnabled", SetDebugCollidersEnabled);
+			wi::lua::RegisterFunc("SetGridHelperEnabled", SetGridHelperEnabled);
+			wi::lua::RegisterFunc("SetDDGIDebugEnabled", SetDDGIDebugEnabled);
 			wi::lua::RegisterFunc("SetVSyncEnabled", SetVSyncEnabled);
 			wi::lua::RegisterFunc("SetResolution", SetResolution);
 			wi::lua::RegisterFunc("SetDebugLightCulling", SetDebugLightCulling);
@@ -421,6 +545,9 @@ namespace wi::lua::renderer
 			wi::lua::RegisterFunc("DrawSphere", DrawSphere);
 			wi::lua::RegisterFunc("DrawCapsule", DrawCapsule);
 			wi::lua::RegisterFunc("DrawDebugText", DrawDebugText);
+			wi::lua::RegisterFunc("DrawVoxelGrid", DrawVoxelGrid);
+			wi::lua::RegisterFunc("DrawPathQuery", DrawPathQuery);
+
 			wi::lua::RegisterFunc("PutWaterRipple", PutWaterRipple);
 
 			wi::lua::RegisterFunc("ClearWorld", ClearWorld);

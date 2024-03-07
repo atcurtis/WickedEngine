@@ -328,7 +328,7 @@ namespace wi
 			fx.enableFullScreen();
 			fx.color = fadeManager.color;
 			fx.opacity = fadeManager.opacity;
-			wi::image::Draw(wi::texturehelper::getWhite(), fx, cmd);
+			wi::image::Draw(nullptr, fx, cmd);
 		}
 
 		// Draw the information display
@@ -530,7 +530,7 @@ namespace wi
 			}
 		}
 
-		wi::profiler::DrawData(canvas, 4, 120, cmd, colorspace);
+		wi::profiler::DrawData(canvas, 4, 10, cmd, colorspace);
 
 		wi::backlog::Draw(canvas, cmd, colorspace);
 

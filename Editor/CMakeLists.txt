@@ -43,6 +43,9 @@ set (SOURCE_FILES
 	HumanoidWindow.cpp
 	GeneralWindow.cpp
 	ProfilerWindow.cpp
+	SpriteWindow.cpp
+	FontWindow.cpp
+ 	VoxelGridWindow.cpp
 	xatlas.cpp
 	EmbeddedResources.cpp
 )
@@ -78,7 +81,7 @@ endif ()
 add_custom_command(
 	TARGET WickedEngineEditor POST_BUILD
 	# Copy shader compiler library in the source folder
-	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/WickedEngine/${LIB_DXCOMPILER} ${CMAKE_CURRENT_BINARY_DIR}
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WICKED_ROOT_DIR}/WickedEngine/${LIB_DXCOMPILER} ${CMAKE_CURRENT_BINARY_DIR}
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/terrain ${CMAKE_CURRENT_BINARY_DIR}/terrain
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/languages ${CMAKE_CURRENT_BINARY_DIR}/languages
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/fonts ${CMAKE_CURRENT_BINARY_DIR}/fonts
@@ -107,13 +110,13 @@ install(DIRECTORY
 # optional .ini .ico .lua
 install(FILES
 		${CMAKE_CURRENT_SOURCE_DIR}/config.ini
-		${CMAKE_CURRENT_SOURCE_DIR}/Editor.ico
+		${CMAKE_CURRENT_SOURCE_DIR}/wicked.ico
 		${CMAKE_CURRENT_SOURCE_DIR}/startup.lua
 		DESTINATION ${EDITOR_INSTALL_FOLDER})
 
 # Installing icon and application "shortcut" on Linux
 if (UNIX)
-	install(FILES ${CMAKE_SOURCE_DIR}/Content/logo_small.png
+	install(FILES ${WICKED_ROOT_DIR}/Content/logo_small.png
 			RENAME wicked.png
 			DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/")
 

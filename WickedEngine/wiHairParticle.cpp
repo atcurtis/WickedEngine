@@ -21,6 +21,7 @@ namespace wi
 {
 	static Shader vs;
 	static Shader ps_prepass;
+	static Shader ps_prepass_depthonly;
 	static Shader ps;
 	static Shader ps_shadow;
 	static Shader ps_simple;
@@ -48,6 +49,15 @@ namespace wi
 
 	void HairParticleSystem::CreateFromMesh(const wi::scene::MeshComponent& mesh)
 	{
+		if (mesh.so_pos.IsValid())
+		{
+			position_format = MeshComponent::Vertex_POS32::FORMAT;
+		}
+		else
+		{
+			position_format = MeshComponent::Vertex_POS16::FORMAT;
+		}
+
 		if (vertex_lengths.size() != mesh.vertex_positions.size())
 		{
 			vertex_lengths.resize(mesh.vertex_positions.size());
@@ -96,23 +106,28 @@ namespace wi
 				bd.misc_flags |= ResourceMiscFlag::RAY_TRACING;
 			}
 
+			const size_t position_stride = GetFormatStride(position_format);
 			const Format ib_format = GetIndexBufferFormatRaw(particleCount * 4);
 			const uint64_t alignment = device->GetMinOffsetAlignment(&bd);
 
 			simulation_view.size = sizeof(PatchSimulationData) * particleCount;
-			vb_pos[0].size = sizeof(MeshComponent::Vertex_POS) * 4 * particleCount;
-			vb_pos[1].size = sizeof(MeshComponent::Vertex_POS) * 4 * particleCount;
+			vb_pos[0].size = position_stride * 4 * particleCount;
+			vb_pos[1].size = position_stride * 4 * particleCount;
+			vb_nor.size = sizeof(MeshComponent::Vertex_NOR) * 4 * particleCount;
 			vb_uvs.size = sizeof(MeshComponent::Vertex_UVS) * 4 * particleCount;
 			ib_culled.size = GetFormatStride(ib_format) * 6 * particleCount;
 			indirect_view.size = sizeof(IndirectDrawArgsIndexedInstanced);
+			vb_pos_raytracing.size = position_stride * 4 * particleCount;
 
 			bd.size =
 				AlignTo(AlignTo(indirect_view.size, alignment), sizeof(IndirectDrawArgsIndexedInstanced)) + // additional structured buffer alignment
 				AlignTo(AlignTo(simulation_view.size, alignment), sizeof(PatchSimulationData)) + // additional structured buffer alignment
 				AlignTo(vb_pos[0].size, alignment) +
 				AlignTo(vb_pos[1].size, alignment) +
+				AlignTo(vb_nor.size, alignment) +
 				AlignTo(vb_uvs.size, alignment) +
-				AlignTo(ib_culled.size, alignment)
+				AlignTo(ib_culled.size, alignment) +
+				AlignTo(vb_pos_raytracing.size, alignment)
 			;
 			device->CreateBuffer(&bd, nullptr, &generalBuffer);
 			device->SetName(&generalBuffer, "HairParticleSystem::generalBuffer");
@@ -142,19 +157,27 @@ namespace wi
 
 			buffer_offset = AlignTo(buffer_offset, alignment);
 			vb_pos[0].offset = buffer_offset;
-			vb_pos[0].subresource_srv = device->CreateSubresource(&generalBuffer, SubresourceType::SRV, vb_pos[0].offset, vb_pos[0].size, &MeshComponent::Vertex_POS::FORMAT);
-			vb_pos[0].subresource_uav = device->CreateSubresource(&generalBuffer, SubresourceType::UAV, vb_pos[0].offset, vb_pos[0].size, &MeshComponent::Vertex_POS::FORMAT);
+			vb_pos[0].subresource_srv = device->CreateSubresource(&generalBuffer, SubresourceType::SRV, vb_pos[0].offset, vb_pos[0].size, &position_format);
+			vb_pos[0].subresource_uav = device->CreateSubresource(&generalBuffer, SubresourceType::UAV, vb_pos[0].offset, vb_pos[0].size, &position_format);
 			vb_pos[0].descriptor_srv = device->GetDescriptorIndex(&generalBuffer, SubresourceType::SRV, vb_pos[0].subresource_srv);
 			vb_pos[0].descriptor_uav = device->GetDescriptorIndex(&generalBuffer, SubresourceType::UAV, vb_pos[0].subresource_uav);
 			buffer_offset += vb_pos[0].size;
 
 			buffer_offset = AlignTo(buffer_offset, alignment);
 			vb_pos[1].offset = buffer_offset;
-			vb_pos[1].subresource_srv = device->CreateSubresource(&generalBuffer, SubresourceType::SRV, vb_pos[1].offset, vb_pos[1].size, &MeshComponent::Vertex_POS::FORMAT);
-			vb_pos[1].subresource_uav = device->CreateSubresource(&generalBuffer, SubresourceType::UAV, vb_pos[1].offset, vb_pos[1].size, &MeshComponent::Vertex_POS::FORMAT);
+			vb_pos[1].subresource_srv = device->CreateSubresource(&generalBuffer, SubresourceType::SRV, vb_pos[1].offset, vb_pos[1].size, &position_format);
+			vb_pos[1].subresource_uav = device->CreateSubresource(&generalBuffer, SubresourceType::UAV, vb_pos[1].offset, vb_pos[1].size, &position_format);
 			vb_pos[1].descriptor_srv = device->GetDescriptorIndex(&generalBuffer, SubresourceType::SRV, vb_pos[1].subresource_srv);
 			vb_pos[1].descriptor_uav = device->GetDescriptorIndex(&generalBuffer, SubresourceType::UAV, vb_pos[1].subresource_uav);
 			buffer_offset += vb_pos[1].size;
+
+			buffer_offset = AlignTo(buffer_offset, alignment);
+			vb_nor.offset = buffer_offset;
+			vb_nor.subresource_srv = device->CreateSubresource(&generalBuffer, SubresourceType::SRV, vb_nor.offset, vb_nor.size, &MeshComponent::Vertex_NOR::FORMAT);
+			vb_nor.subresource_uav = device->CreateSubresource(&generalBuffer, SubresourceType::UAV, vb_nor.offset, vb_nor.size, &MeshComponent::Vertex_NOR::FORMAT);
+			vb_nor.descriptor_srv = device->GetDescriptorIndex(&generalBuffer, SubresourceType::SRV, vb_nor.subresource_srv);
+			vb_nor.descriptor_uav = device->GetDescriptorIndex(&generalBuffer, SubresourceType::UAV, vb_nor.subresource_uav);
+			buffer_offset += vb_nor.size;
 
 			buffer_offset = AlignTo(buffer_offset, alignment);
 			vb_uvs.offset = buffer_offset;
@@ -171,6 +194,12 @@ namespace wi
 			ib_culled.descriptor_srv = device->GetDescriptorIndex(&generalBuffer, SubresourceType::SRV, ib_culled.subresource_srv);
 			ib_culled.descriptor_uav = device->GetDescriptorIndex(&generalBuffer, SubresourceType::UAV, ib_culled.subresource_uav);
 			buffer_offset += ib_culled.size;
+
+			buffer_offset = AlignTo(buffer_offset, alignment);
+			vb_pos_raytracing.offset = buffer_offset;
+			vb_pos_raytracing.subresource_uav = device->CreateSubresource(&generalBuffer, SubresourceType::UAV, vb_pos_raytracing.offset, vb_pos_raytracing.size, &position_format);
+			vb_pos_raytracing.descriptor_uav = device->GetDescriptorIndex(&generalBuffer, SubresourceType::UAV, vb_pos_raytracing.subresource_uav);
+			buffer_offset += vb_pos_raytracing.size;
 
 			primitiveBuffer = wi::renderer::GetIndexBufferForQuads(particleCount);
 		}
@@ -232,10 +261,10 @@ namespace wi
 			geometry.triangles.index_format = GetIndexBufferFormat(primitiveBuffer.desc.format);
 			geometry.triangles.index_count = GetParticleCount() * 6;
 			geometry.triangles.index_offset = 0;
-			geometry.triangles.vertex_count = (uint32_t)(vb_pos[0].size / sizeof(MeshComponent::Vertex_POS));
-			geometry.triangles.vertex_format = Format::R32G32B32_FLOAT;
-			geometry.triangles.vertex_stride = sizeof(MeshComponent::Vertex_POS);
-			geometry.triangles.vertex_byte_offset = vb_pos[0].offset;
+			geometry.triangles.vertex_count = (uint32_t)(vb_pos_raytracing.size / GetFormatStride(position_format));
+			geometry.triangles.vertex_format = position_format == Format::R32G32B32A32_FLOAT ? Format::R32G32B32_FLOAT : position_format;
+			geometry.triangles.vertex_stride = GetFormatStride(position_format);
+			geometry.triangles.vertex_byte_offset = vb_pos_raytracing.offset;
 
 			bool success = device->CreateRaytracingAccelerationStructure(&desc, &BLAS);
 			assert(success);
@@ -272,11 +301,6 @@ namespace wi
 		}
 
 		std::swap(vb_pos[0], vb_pos[1]);
-
-		if (BLAS.IsValid() && !BLAS.desc.bottom_level.geometries.empty())
-		{
-			BLAS.desc.bottom_level.geometries.back().triangles.vertex_byte_offset = vb_pos[0].offset;
-		}
 	}
 	void HairParticleSystem::UpdateGPU(
 		const UpdateGPUItem* items,
@@ -314,6 +338,16 @@ namespace wi
 			}
 			HairParticleCB hcb;
 			hcb.xHairTransform.Create(hair.world);
+			if (!IsFormatUnorm(mesh.position_format) || mesh.so_pos.IsValid())
+			{
+				hcb.xHairBaseMeshUnormRemap.init();
+			}
+			else
+			{
+				XMFLOAT4X4 unormRemap;
+				XMStoreFloat4x4(&unormRemap, mesh.aabb.getUnormRemapMatrix());
+				hcb.xHairBaseMeshUnormRemap.Create(unormRemap);
+			}
 			hcb.xHairRegenerate = hair.regenerate_frame ? 1 : 0;
 			hcb.xLength = hair.length;
 			hcb.xStiffness = hair.stiffness;
@@ -324,7 +358,6 @@ namespace wi
 			hcb.xHairRandomSeed = hair.randomSeed;
 			hcb.xHairViewDistance = hair.viewDistance;
 			hcb.xHairBaseMeshIndexCount = (uint)hair.indices.size();
-			hcb.xHairBaseMeshVertexPositionStride = sizeof(MeshComponent::Vertex_POS);
 			hcb.xHairFramesXY = uint2(std::max(1u, hair.framesX), std::max(1u, hair.framesY));
 			hcb.xHairFrameCount = std::max(1u, hair.frameCount);
 			hcb.xHairFrameStart = hair.frameStart;
@@ -371,6 +404,8 @@ namespace wi
 			device->BindUAV(&hair.generalBuffer, 2, cmd, hair.vb_uvs.subresource_uav);
 			device->BindUAV(&hair.generalBuffer, 3, cmd, hair.ib_culled.subresource_uav);
 			device->BindUAV(&hair.generalBuffer, 4, cmd, hair.indirect_view.subresource_uav);
+			device->BindUAV(&hair.generalBuffer, 5, cmd, hair.vb_pos_raytracing.subresource_uav);
+			device->BindUAV(&hair.generalBuffer, 6, cmd, hair.vb_nor.subresource_uav);
 
 			if (hair.indexBuffer.IsValid())
 			{
@@ -382,13 +417,15 @@ namespace wi
 			}
 			if (mesh.streamoutBuffer.IsValid())
 			{
-				device->BindResource(&mesh.streamoutBuffer, 1, cmd, mesh.so_pos_nor_wind.subresource_srv);
+				device->BindResource(&mesh.streamoutBuffer, 1, cmd, mesh.so_pos.subresource_srv);
+				device->BindResource(&mesh.streamoutBuffer, 2, cmd, mesh.so_nor.subresource_srv);
 			}
 			else
 			{
-				device->BindResource(&mesh.generalBuffer, 1, cmd, mesh.vb_pos_nor_wind.subresource_srv);
+				device->BindResource(&mesh.generalBuffer, 1, cmd, mesh.vb_pos_wind.subresource_srv);
+				device->BindResource(&mesh.generalBuffer, 2, cmd, mesh.vb_nor.subresource_srv);
 			}
-			device->BindResource(&hair.vertexBuffer_length, 2, cmd);
+			device->BindResource(&hair.vertexBuffer_length, 3, cmd);
 
 			device->Dispatch((hair.strandCount + THREADCOUNT_SIMULATEHAIR - 1) / THREADCOUNT_SIMULATEHAIR, 1, 1, cmd);
 
@@ -402,6 +439,8 @@ namespace wi
 
 	void HairParticleSystem::InitializeGPUDataIfNeeded(wi::graphics::CommandList cmd)
 	{
+		if (strandCount == 0 || !generalBuffer.IsValid())
+			return;
 		if (gpu_initialized)
 			return;
 		GraphicsDevice* device = wi::graphics::GetDevice();
@@ -424,7 +463,7 @@ namespace wi
 
 		if (wi::renderer::IsWireRender())
 		{
-			if (renderPass == RENDERPASS_PREPASS)
+			if (renderPass == RENDERPASS_PREPASS || renderPass == RENDERPASS_PREPASS_DEPTHONLY)
 			{
 				return;
 			}
@@ -434,7 +473,7 @@ namespace wi
 		{
 			device->BindPipelineState(&PSO[renderPass], cmd);
 
-			if (renderPass != RENDERPASS_PREPASS) // depth only alpha test will be full res
+			if (renderPass != RENDERPASS_PREPASS || renderPass == RENDERPASS_PREPASS_DEPTHONLY) // depth only alpha test will be full res
 			{
 				device->BindShadingRate(material.shadingRate, cmd);
 			}
@@ -515,6 +554,7 @@ namespace wi
 
 			wi::renderer::LoadShader(ShaderStage::PS, ps_simple, "hairparticlePS_simple.cso");
 			wi::renderer::LoadShader(ShaderStage::PS, ps_prepass, "hairparticlePS_prepass.cso");
+			wi::renderer::LoadShader(ShaderStage::PS, ps_prepass_depthonly, "hairparticlePS_prepass_depthonly.cso");
 			wi::renderer::LoadShader(ShaderStage::PS, ps_shadow, "hairparticlePS_shadow.cso");
 			wi::renderer::LoadShader(ShaderStage::PS, ps, "hairparticlePS.cso");
 
@@ -524,7 +564,7 @@ namespace wi
 
 			for (int i = 0; i < RENDERPASS_COUNT; ++i)
 			{
-				if (i == RENDERPASS_PREPASS || i == RENDERPASS_MAIN || i == RENDERPASS_SHADOW)
+				if (i == RENDERPASS_PREPASS || i == RENDERPASS_PREPASS_DEPTHONLY || i == RENDERPASS_MAIN || i == RENDERPASS_SHADOW)
 				{
 					PipelineStateDesc desc;
 					desc.vs = &vs;
@@ -537,6 +577,9 @@ namespace wi
 					{
 					case RENDERPASS_PREPASS:
 						desc.ps = &ps_prepass;
+						break;
+					case RENDERPASS_PREPASS_DEPTHONLY:
+						desc.ps = &ps_prepass_depthonly;
 						break;
 					case RENDERPASS_MAIN:
 						desc.ps = &ps;

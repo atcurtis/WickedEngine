@@ -799,10 +799,7 @@ namespace wi::helper
 
 		if (is_png)
 		{
-			// lodepng encoder is better compressing than stb_image_write:
-			unsigned error = lodepng::encode(filedata, texturedata, desc.width, desc.height);
-			return error == 0;
-			//write_result = stbi_write_png_to_func(func, &filedata, (int)mip.width, (int)mip.height, dst_channel_count, mip.address, 0);
+			write_result = stbi_write_png_to_func(func, &filedata, (int)mip.width, (int)mip.height, dst_channel_count, mip.address, 0);
 		}
 		else if (!extension.compare("JPG") || !extension.compare("JPEG"))
 		{
@@ -958,6 +955,13 @@ namespace wi::helper
 #else
 #define ToNativeString(x) (x)
 #endif // _WIN32
+
+	std::string GetPathRelative(const std::string& rootdir, std::string& path)
+	{
+		std::string ret = path;
+		MakePathRelative(rootdir, ret);
+		return ret;
+	}
 
 	void MakePathRelative(const std::string& rootdir, std::string& path)
 	{
@@ -1695,6 +1699,29 @@ namespace wi::helper
 		else
 		{
 			ss << sizeInBytes << " bytes";
+		}
+		return ss.str();
+	}
+
+	std::string GetTimerDurationText(float timerSeconds)
+	{
+		std::stringstream ss;
+		ss << std::fixed << std::setprecision(1);
+		if (timerSeconds < 1)
+		{
+			ss << timerSeconds * 1000 << " ms";
+		}
+		else if (timerSeconds < 60)
+		{
+			ss << timerSeconds << " sec";
+		}
+		else if (timerSeconds < 60 * 60)
+		{
+			ss << timerSeconds * 60 << " min";
+		}
+		else
+		{
+			ss << timerSeconds * 60 * 60 << " hours";
 		}
 		return ss.str();
 	}

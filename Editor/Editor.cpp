@@ -29,12 +29,50 @@ namespace dummy_male
 #include "dummy_male.h"
 }
 
+enum class FileType
+{
+	INVALID,
+	LUA,
+	WISCENE,
+	OBJ,
+	GLTF,
+	GLB,
+	VRM,
+	IMAGE,
+	VIDEO,
+	SOUND,
+};
+static wi::unordered_map<std::string, FileType> filetypes = {
+	{"LUA", FileType::LUA},
+	{"WISCENE", FileType::WISCENE},
+	{"OBJ", FileType::OBJ},
+	{"GLTF", FileType::GLTF},
+	{"GLB", FileType::GLB},
+	{"VRM", FileType::VRM},
+};
+
 void Editor::Initialize()
 {
 	if (config.Has("font"))
 	{
 		// Replace default font from config:
 		wi::font::AddFontStyle(config.GetText("font"));
+	}
+
+	auto ext_video = wi::resourcemanager::GetSupportedVideoExtensions();
+	for (auto& x : ext_video)
+	{
+		filetypes[x] = FileType::VIDEO;
+	}
+	auto ext_sound = wi::resourcemanager::GetSupportedSoundExtensions();
+	for (auto& x : ext_sound)
+	{
+		filetypes[x] = FileType::SOUND;
+	}
+	auto ext_image = wi::resourcemanager::GetSupportedImageExtensions();
+	for (auto& x : ext_image)
+	{
+		filetypes[x] = FileType::IMAGE;
 	}
 
 	Application::Initialize();
@@ -62,7 +100,6 @@ void Editor::Initialize()
 	loader.addLoadingComponent(&renderComponent, this, 0.2f);
 
 	ActivatePath(&loader);
-
 }
 
 void EditorLoadingScreen::Load()
@@ -187,8 +224,6 @@ void EditorComponent::Load()
 		});
 	GetGUI().AddWidget(&newSceneButton);
 
-
-
 	translateButton.Create(ICON_TRANSLATE);
 	rotateButton.Create(ICON_ROTATE);
 	scaleButton.Create(ICON_SCALE);
@@ -224,6 +259,20 @@ void EditorComponent::Load()
 		GetGUI().AddWidget(&translateButton);
 	}
 
+	physicsButton.Create(ICON_RIGIDBODY);
+	physicsButton.SetShadowRadius(2);
+	physicsButton.SetTooltip("Toggle Physics Simulation On/Off");
+	if (main->config.GetSection("options").Has("physics"))
+	{
+		wi::physics::SetSimulationEnabled(main->config.GetSection("options").GetBool("physics"));
+	}
+	physicsButton.OnClick([&](wi::gui::EventArgs args) {
+		wi::physics::SetSimulationEnabled(!wi::physics::IsSimulationEnabled());
+		main->config.GetSection("options").Set("physics", wi::physics::IsSimulationEnabled());
+		main->config.Commit();
+		});
+	GetGUI().AddWidget(&physicsButton);
+
 	dummyButton.Create(ICON_DUMMY);
 	dummyButton.SetShadowRadius(2);
 	dummyButton.SetTooltip("Toggle reference dummy visualizer\n - Use the reference dummy to get an idea about object sizes compared to a human character size.\n - Position the dummy by clicking on something with the left mouse button while the dummy is active and nothing is selected.\n - Pressing this button while Ctrl key is held down will reset dummy position to the origin.\n - Pressing this button while the Shift key is held down will switch between male and female dummies.");
@@ -243,6 +292,15 @@ void EditorComponent::Load()
 		}
 	});
 	GetGUI().AddWidget(&dummyButton);
+
+	navtestButton.Create(ICON_NAVIGATION);
+	navtestButton.SetShadowRadius(2);
+	navtestButton.SetTooltip("Toggle navigation testing. When enabled, you can visualize path finding results.\nYou can put down START and GOAL waypoints inside voxel grids to test path finding.\nControls:\n----------\nF5 + left click: put START to surface\nF6 + left click: put GOAL to surface\nF7 + left click: put START to air\nF8 + left click: put GOAL to air");
+	navtestButton.SetLocalizationEnabled(wi::gui::LocalizationEnabled::Tooltip);
+	navtestButton.OnClick([&](wi::gui::EventArgs args) {
+		navtest_enabled = !navtest_enabled;
+	});
+	GetGUI().AddWidget(&navtestButton);
 
 	playButton.Create(ICON_PLAY);
 	playButton.font.params.shadowColor = wi::Color::Transparent();
@@ -326,13 +384,28 @@ void EditorComponent::Load()
 	openButton.OnClick([&](wi::gui::EventArgs args) {
 		wi::helper::FileDialogParams params;
 		params.type = wi::helper::FileDialogParams::OPEN;
-		params.description = ".wiscene, .obj, .gltf, .glb, .vrm, .lua";
+		params.description = ".wiscene, .obj, .gltf, .glb, .vrm, .lua, .mp4, .png, ...";
 		params.extensions.push_back("wiscene");
 		params.extensions.push_back("obj");
 		params.extensions.push_back("gltf");
 		params.extensions.push_back("glb");
 		params.extensions.push_back("vrm");
 		params.extensions.push_back("lua");
+		auto ext_video = wi::resourcemanager::GetSupportedVideoExtensions();
+		for (auto& x : ext_video)
+		{
+			params.extensions.push_back(x);
+		}
+		auto ext_sound = wi::resourcemanager::GetSupportedSoundExtensions();
+		for (auto& x : ext_sound)
+		{
+			params.extensions.push_back(x);
+		}
+		auto ext_image = wi::resourcemanager::GetSupportedImageExtensions();
+		for (auto& x : ext_image)
+		{
+			params.extensions.push_back(x);
+		}
 		wi::helper::FileDialog(params, [&](std::string fileName) {
 			wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
 				Open(fileName);
@@ -467,7 +540,7 @@ void EditorComponent::Load()
 		ss += "Move camera: WASD, or Contoller left stick or D-pad\n";
 		ss += "Look: Middle mouse button / arrow keys / controller right stick\n";
 		ss += "Select: Right mouse button\n";
-		ss += "Interact with water: Left mouse button when nothing is selected\n";
+		ss += "Interact with physics/water: Left mouse button when nothing is selected\n";
 		ss += "Faster camera: Left Shift button or controller R2/RT\n";
 		ss += "Snap transform: Left Ctrl (hold while transforming)\n";
 		ss += "Camera up: E\n";
@@ -494,6 +567,7 @@ void EditorComponent::Load()
 		ss += "Focus on selected: F button, this will make the camera jump to selection.\n";
 		ss += "Inspector mode: I button (hold), hovered entity information will be displayed near mouse position.\n";
 		ss += "Place Instances: Ctrl + Shift + Left mouse click (place clipboard onto clicked surface)\n";
+		ss += "Ragdoll and physics impulse tester: Hold P and click on ragdoll or rigid body physics entity.\n";
 		ss += "Script Console / backlog: HOME button\n";
 		ss += "Bone picking: First select an armature, only then bone picking becomes available. As long as you have an armature or bone selected, bone picking will remain active.\n";
 		ss += "\n";
@@ -784,7 +858,7 @@ void EditorComponent::Update(float dt)
 
 			const float speed = ((wi::input::Down(wi::input::KEYBOARD_BUTTON_LSHIFT) ? 10.0f : 1.0f) + rightTrigger.x * 10.0f) * optionsWnd.cameraWnd.movespeedSlider.GetValue() * clampedDT;
 			XMVECTOR move = XMLoadFloat3(&editorscene.cam_move);
-			XMVECTOR moveNew = XMVectorSet(leftStick.x, 0, leftStick.y, 0);
+			XMVECTOR moveNew = XMVectorSet(0, 0, 0, 0);
 
 			if (!wi::input::Down(wi::input::KEYBOARD_BUTTON_LCONTROL))
 			{
@@ -795,8 +869,9 @@ void EditorComponent::Update(float dt)
 				if (wi::input::Down((wi::input::BUTTON)'S') || wi::input::Down(wi::input::GAMEPAD_BUTTON_DOWN)) { moveNew += XMVectorSet(0, 0, -1, 0); }
 				if (wi::input::Down((wi::input::BUTTON)'E') || wi::input::Down(wi::input::GAMEPAD_BUTTON_2)) { moveNew += XMVectorSet(0, 1, 0, 0); }
 				if (wi::input::Down((wi::input::BUTTON)'Q') || wi::input::Down(wi::input::GAMEPAD_BUTTON_1)) { moveNew += XMVectorSet(0, -1, 0, 0); }
-				moveNew += XMVector3Normalize(moveNew);
+				moveNew = XMVector3Normalize(moveNew);
 			}
+			moveNew += XMVectorSet(leftStick.x, 0, leftStick.y, 0);
 			moveNew *= speed;
 
 			move = XMVectorLerp(move, moveNew, optionsWnd.cameraWnd.accelerationSlider.GetValue() * clampedDT / 0.0166f); // smooth the movement a bit
@@ -856,7 +931,7 @@ void EditorComponent::Update(float dt)
 		inspector_mode = wi::input::Down((wi::input::BUTTON)'I');
 
 		// Begin picking:
-		Ray pickRay = wi::renderer::GetPickRay((long)currentMouse.x, (long)currentMouse.y, *this, camera);
+		pickRay = wi::renderer::GetPickRay((long)currentMouse.x, (long)currentMouse.y, *this, camera);
 		{
 			hovered = wi::scene::PickResult();
 
@@ -1083,6 +1158,25 @@ void EditorComponent::Update(float dt)
 					}
 				}
 			}
+			if (has_flag(optionsWnd.filter, OptionsWindow::Filter::VoxelGrid))
+			{
+				for (size_t i = 0; i < scene.voxel_grids.GetCount(); ++i)
+				{
+					Entity entity = scene.voxel_grids.GetEntity(i);
+					if (!scene.transforms.Contains(entity))
+						continue;
+					const TransformComponent& transform = *scene.transforms.GetComponent(entity);
+
+					XMVECTOR disV = XMVector3LinePointDistance(XMLoadFloat3(&pickRay.origin), XMLoadFloat3(&pickRay.origin) + XMLoadFloat3(&pickRay.direction), transform.GetPositionV());
+					float dis = XMVectorGetX(disV);
+					if (dis > 0.01f && dis < wi::math::Distance(transform.GetPosition(), pickRay.origin) * 0.05f && dis < hovered.distance)
+					{
+						hovered = wi::scene::PickResult();
+						hovered.entity = entity;
+						hovered.distance = dis;
+					}
+				}
+			}
 			if (bone_picking)
 			{
 				for (size_t i = 0; i < scene.armatures.GetCount(); ++i)
@@ -1193,6 +1287,52 @@ void EditorComponent::Update(float dt)
 		if (optionsWnd.paintToolWnd.GetMode() == PaintToolWindow::MODE_DISABLED)
 		{
 			// Interact:
+			if (wi::input::Down((wi::input::BUTTON)'P'))
+			{
+				if (wi::input::Press(wi::input::MOUSE_BUTTON_LEFT))
+				{
+					// Physics impulse tester:
+					wi::physics::RayIntersectionResult result = wi::physics::Intersects(scene, pickRay);
+					if (result.IsValid())
+					{
+						XMFLOAT3 impulse;
+						XMStoreFloat3(&impulse, XMVector3Normalize(XMLoadFloat3(&pickRay.direction)) * 20);
+						if (result.humanoid_ragdoll_entity != INVALID_ENTITY)
+						{
+							// Ragdoll:
+							HumanoidComponent* humanoid = scene.humanoids.GetComponent(result.humanoid_ragdoll_entity);
+							if (humanoid != nullptr)
+							{
+								humanoid->SetRagdollPhysicsEnabled(true);
+								wi::physics::ApplyImpulseAt(*humanoid, result.humanoid_bone, impulse, result.position_local);
+							}
+						}
+						else
+						{
+							// Rigidbody:
+							RigidBodyPhysicsComponent* rigidbody = scene.rigidbodies.GetComponent(result.entity);
+							if (rigidbody != nullptr)
+							{
+								wi::physics::ApplyImpulseAt(*rigidbody, impulse, result.position_local);
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				// Physics pick dragger:
+				if (wi::input::Down(wi::input::MOUSE_BUTTON_LEFT))
+				{
+					wi::physics::PickDrag(scene, pickRay, physicsDragOp);
+				}
+				else
+				{
+					physicsDragOp = {};
+				}
+			}
+
+			// Other:
 			if (hovered.entity != INVALID_ENTITY && wi::input::Down(wi::input::MOUSE_BUTTON_LEFT))
 			{
 				if (dummy_enabled && translator.selected.empty())
@@ -1207,7 +1347,7 @@ void EditorComponent::Update(float dt)
 						if (translator.selected.empty() && object->GetFilterMask() & wi::enums::FILTER_WATER)
 						{
 							// if water, then put a water ripple onto it:
-							scene.PutWaterRipple("../Content/models/ripple.png", hovered.position);
+							scene.PutWaterRipple(hovered.position);
 						}
 						else if (componentsWnd.decalWnd.IsEnabled() && componentsWnd.decalWnd.placementCheckBox.GetCheck() && wi::input::Press(wi::input::MOUSE_BUTTON_LEFT))
 						{
@@ -1297,7 +1437,7 @@ void EditorComponent::Update(float dt)
 				{
 					// Union selection:
 					wi::vector<wi::scene::PickResult> saved = translator.selected;
-					translator.selected.clear(); 
+					translator.selected.clear();
 					for (const wi::scene::PickResult& picked : saved)
 					{
 						AddSelected(picked);
@@ -1586,6 +1726,9 @@ void EditorComponent::Update(float dt)
 		componentsWnd.armatureWnd.SetEntity(INVALID_ENTITY);
 		componentsWnd.humanoidWnd.SetEntity(INVALID_ENTITY);
 		componentsWnd.terrainWnd.SetEntity(INVALID_ENTITY);
+		componentsWnd.spriteWnd.SetEntity(INVALID_ENTITY);
+		componentsWnd.fontWnd.SetEntity(INVALID_ENTITY);
+		componentsWnd.voxelGridWnd.SetEntity(INVALID_ENTITY);
 	}
 	else
 	{
@@ -1617,6 +1760,9 @@ void EditorComponent::Update(float dt)
 		componentsWnd.armatureWnd.SetEntity(picked.entity);
 		componentsWnd.humanoidWnd.SetEntity(picked.entity);
 		componentsWnd.terrainWnd.SetEntity(picked.entity);
+		componentsWnd.spriteWnd.SetEntity(picked.entity);
+		componentsWnd.fontWnd.SetEntity(picked.entity);
+		componentsWnd.voxelGridWnd.SetEntity(picked.entity);
 
 		if (picked.subsetIndex >= 0)
 		{
@@ -1785,6 +1931,75 @@ void EditorComponent::Update(float dt)
 	renderPath->colorspace = colorspace;
 	renderPath->Update(dt);
 
+	if (navtest_enabled)
+	{
+		if (hovered.entity != INVALID_ENTITY && wi::input::Down(wi::input::KEYBOARD_BUTTON_F5))
+		{
+			navtest_start_pick = hovered;
+		}
+		if (hovered.entity != INVALID_ENTITY && wi::input::Down(wi::input::KEYBOARD_BUTTON_F6))
+		{
+			navtest_goal_pick = hovered;
+		}
+		if (wi::input::Down(wi::input::KEYBOARD_BUTTON_F7) && wi::input::Down(wi::input::MOUSE_BUTTON_LEFT))
+		{
+			navtest_start_pick.entity = INVALID_ENTITY;
+			XMStoreFloat3(&navtest_start_pick.position, XMLoadFloat3(&pickRay.origin) + XMLoadFloat3(&pickRay.direction) * 2);
+		}
+		if (wi::input::Down(wi::input::KEYBOARD_BUTTON_F8) && wi::input::Down(wi::input::MOUSE_BUTTON_LEFT))
+		{
+			navtest_goal_pick.entity = INVALID_ENTITY;
+			XMStoreFloat3(&navtest_goal_pick.position, XMLoadFloat3(&pickRay.origin) + XMLoadFloat3(&pickRay.direction) * 2);
+		}
+
+		navtest_pathquery.flying = false;
+		if (
+			navtest_start_pick.entity != INVALID_ENTITY &&
+			navtest_goal_pick.entity != INVALID_ENTITY
+			)
+		{
+			navtest_start_pick.position = scene.GetPositionOnSurface(
+				navtest_start_pick.entity,
+				navtest_start_pick.vertexID0,
+				navtest_start_pick.vertexID1,
+				navtest_start_pick.vertexID2,
+				navtest_start_pick.bary
+			);
+			navtest_goal_pick.position = scene.GetPositionOnSurface(
+				navtest_goal_pick.entity,
+				navtest_goal_pick.vertexID0,
+				navtest_goal_pick.vertexID1,
+				navtest_goal_pick.vertexID2,
+				navtest_goal_pick.bary
+			);
+		}
+		else if(
+			navtest_start_pick.entity == INVALID_ENTITY &&
+			navtest_goal_pick.entity == INVALID_ENTITY
+			)
+		{
+			navtest_pathquery.flying = true;
+		}
+
+		for (size_t i = 0; i < scene.voxel_grids.GetCount(); ++i)
+		{
+			const wi::VoxelGrid& voxelgrid = scene.voxel_grids[i];
+			AABB aabb = voxelgrid.get_aabb();
+			if (aabb.intersects(navtest_start_pick.position) && aabb.intersects(navtest_goal_pick.position))
+			{
+				auto range = wi::profiler::BeginRangeCPU("NAVTEST PATHQUERY");
+				navtest_pathquery.process(
+					navtest_start_pick.position,
+					navtest_goal_pick.position,
+					voxelgrid
+				);
+				wi::profiler::EndRange(range);
+				wi::renderer::DrawPathQuery(&navtest_pathquery);
+				break;
+			}
+		}
+
+	}
 
 	bool force_collider_visualizer = false;
 	for (auto& x : translator.selected)
@@ -1808,6 +2023,31 @@ void EditorComponent::PostUpdate()
 	RenderPath2D::PostUpdate();
 
 	renderPath->PostUpdate();
+
+	// This needs to be after scene was updated fully by EditorComponent's renderPath
+	//	Because this will just render the scene without updating its resources
+	if (renderPath->getSceneUpdateEnabled()) // only update preview if scene was updated at all by main renderPath
+	{
+		componentsWnd.cameraComponentWnd.preview.RenderPreview();
+	}
+
+	const Scene& scene = GetCurrentScene();
+	if (componentsWnd.voxelGridWnd.debugAllCheckBox.GetCheck())
+	{
+		// Draw all voxel grids:
+		for (size_t i = 0; i < scene.voxel_grids.GetCount(); ++i)
+		{
+			wi::renderer::DrawVoxelGrid(&scene.voxel_grids[i]);
+		}
+	}
+	else
+	{
+		// Draw only selected:
+		if (scene.voxel_grids.Contains(componentsWnd.voxelGridWnd.entity))
+		{
+			wi::renderer::DrawVoxelGrid(scene.voxel_grids.GetComponent(componentsWnd.voxelGridWnd.entity));
+		}
+	}
 }
 void EditorComponent::Render() const
 {
@@ -1971,10 +2211,7 @@ void EditorComponent::Render() const
 						RenderPassImage::DepthStencil(
 							renderPath->GetDepthStencil(),
 							RenderPassImage::LoadOp::LOAD,
-							RenderPassImage::StoreOp::STORE,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY
+							RenderPassImage::StoreOp::STORE
 						),
 					};
 					device->RenderPassBegin(rp, arraysize(rp), cmd);
@@ -1986,10 +2223,7 @@ void EditorComponent::Render() const
 						RenderPassImage::DepthStencil(
 							renderPath->GetDepthStencil(),
 							RenderPassImage::LoadOp::LOAD,
-							RenderPassImage::StoreOp::STORE,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY
+							RenderPassImage::StoreOp::STORE
 						),
 					};
 					device->RenderPassBegin(rp, arraysize(rp), cmd);
@@ -1997,7 +2231,7 @@ void EditorComponent::Render() const
 
 				// Draw solid blocks of selected materials
 				fx.stencilRef = EDITORSTENCILREF_HIGHLIGHT_MATERIAL;
-				wi::image::Draw(wi::texturehelper::getWhite(), fx, cmd);
+				wi::image::Draw(nullptr, fx, cmd);
 
 				device->RenderPassEnd(cmd);
 			}
@@ -2012,10 +2246,7 @@ void EditorComponent::Render() const
 						RenderPassImage::DepthStencil(
 							renderPath->GetDepthStencil(),
 							RenderPassImage::LoadOp::LOAD,
-							RenderPassImage::StoreOp::STORE,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY
+							RenderPassImage::StoreOp::STORE
 						),
 					};
 					device->RenderPassBegin(rp, arraysize(rp), cmd);
@@ -2027,10 +2258,7 @@ void EditorComponent::Render() const
 						RenderPassImage::DepthStencil(
 							renderPath->GetDepthStencil(),
 							RenderPassImage::LoadOp::LOAD,
-							RenderPassImage::StoreOp::STORE,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY,
-							ResourceState::DEPTHSTENCIL_READONLY
+							RenderPassImage::StoreOp::STORE
 						),
 					};
 					device->RenderPassBegin(rp, arraysize(rp), cmd);
@@ -2038,7 +2266,7 @@ void EditorComponent::Render() const
 
 				// Draw solid blocks of selected objects
 				fx.stencilRef = EDITORSTENCILREF_HIGHLIGHT_OBJECT;
-				wi::image::Draw(wi::texturehelper::getWhite(), fx, cmd);
+				wi::image::Draw(nullptr, fx, cmd);
 
 				device->RenderPassEnd(cmd);
 			}
@@ -2629,6 +2857,36 @@ void EditorComponent::Render() const
 
 
 					wi::font::Draw(ICON_VIDEO, fp, cmd);
+				}
+			}
+			if (has_flag(optionsWnd.filter, OptionsWindow::Filter::VoxelGrid))
+			{
+				for (size_t i = 0; i < scene.voxel_grids.GetCount(); ++i)
+				{
+					Entity entity = scene.voxel_grids.GetEntity(i);
+					if (!scene.transforms.Contains(entity))
+						continue;
+					const TransformComponent& transform = *scene.transforms.GetComponent(entity);
+
+					fp.position = transform.GetPosition();
+					fp.scaling = scaling * wi::math::Distance(transform.GetPosition(), camera.Eye);
+					fp.color = inactiveEntityColor;
+
+					if (hovered.entity == entity)
+					{
+						fp.color = hoveredEntityColor;
+					}
+					for (auto& picked : translator.selected)
+					{
+						if (picked.entity == entity)
+						{
+							fp.color = selectedEntityColor;
+							break;
+						}
+					}
+
+
+					wi::font::Draw(ICON_VOXELGRID, fp, cmd);
 				}
 			}
 			if (bone_picking)
@@ -3351,24 +3609,6 @@ void EditorComponent::ConsumeHistoryOperation(bool undo)
 	optionsWnd.RefreshEntityTree();
 }
 
-enum class FileType
-{
-	INVALID,
-	LUA,
-	WISCENE,
-	OBJ,
-	GLTF,
-	GLB,
-	VRM,
-};
-static const wi::unordered_map<std::string, FileType> filetypes = {
-	{"LUA", FileType::LUA},
-	{"WISCENE", FileType::WISCENE},
-	{"OBJ", FileType::OBJ},
-	{"GLTF", FileType::GLTF},
-	{"GLB", FileType::GLB},
-	{"VRM", FileType::VRM},
-};
 void EditorComponent::Open(const std::string& filename)
 {
 	std::string extension = wi::helper::toUpper(wi::helper::GetExtensionFromFileName(filename));
@@ -3389,6 +3629,41 @@ void EditorComponent::Open(const std::string& filename)
 		main->config.Commit();
 		playButton.SetScriptTip("dofile(\"" + last_script_path + "\")");
 		wi::lua::RunFile(filename);
+		optionsWnd.RefreshEntityTree();
+		return;
+	}
+	if (type == FileType::VIDEO)
+	{
+		GetCurrentScene().Entity_CreateVideo(wi::helper::GetFileNameFromPath(filename), filename);
+		optionsWnd.RefreshEntityTree();
+		return;
+	}
+	if (type == FileType::SOUND)
+	{
+		GetCurrentScene().Entity_CreateSound(wi::helper::GetFileNameFromPath(filename), filename);
+		optionsWnd.RefreshEntityTree();
+		return;
+	}
+	if (type == FileType::IMAGE)
+	{
+		Scene& scene = GetCurrentScene();
+		Entity entity = CreateEntity();
+		wi::Sprite& sprite = scene.sprites.Create(entity);
+		sprite = wi::Sprite(filename);
+		if (sprite.textureResource.IsValid())
+		{
+			const TextureDesc& desc = sprite.textureResource.GetTexture().GetDesc();
+			sprite.params.siz = XMFLOAT2(1, float(desc.height) / float(desc.width));
+		}
+		else
+		{
+			sprite.params.siz = XMFLOAT2(1, 1);
+		}
+		sprite.params.pivot = XMFLOAT2(0.5f, 0.5f);
+		sprite.anim.repeatable = true;
+		scene.transforms.Create(entity).Translate(XMFLOAT3(0, 2, 0));
+		scene.names.Create(entity) = wi::helper::GetFileNameFromPath(filename);
+		optionsWnd.RefreshEntityTree();
 		return;
 	}
 
@@ -3740,9 +4015,14 @@ void EditorComponent::UpdateTopMenuAnimation()
 
 	dummyButton.SetSize(XMFLOAT2(wid_idle * 0.75f, hei));
 	dummyButton.SetPos(XMFLOAT2(static_pos - dummyButton.GetSize().x - 20, 0));
+	navtestButton.SetSize(XMFLOAT2(wid_idle * 0.75f, hei));
+	navtestButton.SetPos(XMFLOAT2(dummyButton.GetPos().x - navtestButton.GetSize().x - padding, 0));
+
+	physicsButton.SetSize(XMFLOAT2(wid_idle * 0.75f, hei));
+	physicsButton.SetPos(XMFLOAT2(navtestButton.GetPos().x - physicsButton.GetSize().x - 20, 0));
 
 	stopButton.SetSize(XMFLOAT2(wid_idle * 0.75f, hei));
-	stopButton.SetPos(XMFLOAT2(dummyButton.GetPos().x - stopButton.GetSize().x - 20, 0));
+	stopButton.SetPos(XMFLOAT2(physicsButton.GetPos().x - stopButton.GetSize().x - 20, 0));
 	playButton.SetSize(XMFLOAT2(wid_idle * 0.75f, hei));
 	playButton.SetPos(XMFLOAT2(stopButton.GetPos().x - playButton.GetSize().x - padding, 0));
 
@@ -3783,6 +4063,24 @@ void EditorComponent::UpdateTopMenuAnimation()
 	else
 	{
 		dummyButton.sprites[wi::gui::IDLE].params.color = color_off;
+	}
+
+	if (navtest_enabled)
+	{
+		navtestButton.sprites[wi::gui::IDLE].params.color = color_on;
+	}
+	else
+	{
+		navtestButton.sprites[wi::gui::IDLE].params.color = color_off;
+	}
+
+	if (wi::physics::IsSimulationEnabled())
+	{
+		physicsButton.sprites[wi::gui::IDLE].params.color = color_on;
+	}
+	else
+	{
+		physicsButton.sprites[wi::gui::IDLE].params.color = color_off;
 	}
 
 	float ofs = screenW - 2;
@@ -3877,6 +4175,9 @@ void EditorComponent::RefreshSceneList()
 			componentsWnd.armatureWnd.SetEntity(wi::ecs::INVALID_ENTITY);
 			componentsWnd.humanoidWnd.SetEntity(wi::ecs::INVALID_ENTITY);
 			componentsWnd.terrainWnd.SetEntity(wi::ecs::INVALID_ENTITY);
+			componentsWnd.spriteWnd.SetEntity(wi::ecs::INVALID_ENTITY);
+			componentsWnd.fontWnd.SetEntity(wi::ecs::INVALID_ENTITY);
+			componentsWnd.voxelGridWnd.SetEntity(wi::ecs::INVALID_ENTITY);
 
 			optionsWnd.RefreshEntityTree();
 			ResetHistory();
