@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.8)
 
 set(VCPKG_ROOT $ENV{VCPKG_ROOT})
-include(${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+if(EXISTS "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+  include(${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+endif()
 
 set(WICKED_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 

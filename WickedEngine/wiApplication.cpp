@@ -136,7 +136,7 @@ namespace wi
 			{
 				if (wi::lua::RunFile(startup_lua_filename))
 				{
-					wi::backlog::post("Executed startup file: " + startup_lua_filename);
+					wi::backlog::post_backlog("Executed startup file: " + startup_lua_filename);
 				}
 			}
 			std::string startup_luab_filename = wi::helper::GetCurrentPath() + "/startup.luab";
@@ -144,7 +144,7 @@ namespace wi
 			{
 				if (wi::lua::RunBinaryFile(startup_luab_filename))
 				{
-					wi::backlog::post("Executed startup file: " + startup_luab_filename);
+					wi::backlog::post_backlog("Executed startup file: " + startup_luab_filename);
 				}
 			}
 		}

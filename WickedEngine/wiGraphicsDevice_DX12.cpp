@@ -2747,7 +2747,7 @@ using namespace dx12_internal;
 			}
 			error += "\nExiting.";
 			wi::helper::messageBox(error, "Error!");
-			wi::backlog::post(error, wi::backlog::LogLevel::Error);
+			wi::backlog::post_backlog(error, wi::backlog::LogLevel::Error);
 			wi::platform::Exit();
 		}
 

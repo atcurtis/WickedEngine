@@ -22,6 +22,12 @@
 
 using namespace wi::graphics;
 
+#ifdef WIN32
+#define LOGTIME ::google::LogMessageTime&
+#else
+#define LOGTIME struct ::tm*
+#endif
+
 namespace wi::backlog
 {
 	bool enabled = false;
@@ -69,7 +75,7 @@ namespace wi::backlog
 	public:
 		void send(google::LogSeverity severity, const char* full_filename,
 			const char* base_filename, int line,
-			const google::LogMessageTime& logmsgtime, const char* message,
+			const LOGTIME logmsgtime, const char* message,
 			size_t message_len);
 	};
 
@@ -353,7 +359,7 @@ namespace wi::backlog
 	}
 	void BacklogSink::send(google::LogSeverity severity, const char* full_filename,
 		const char* base_filename, int line,
-		const google::LogMessageTime& logmsgtime,
+		const LOGTIME logmsgtime,
 		const char* message, size_t message_len)
 	{
 		LogLevel level;

@@ -678,7 +678,7 @@ void ObjectWindow::Create(EditorComponent* _editor)
 					}
 				}
 			}
-			wi::backlog::post("Building BVHs for vertex AO took " + wi::helper::GetTimerDurationText((float)timer.elapsed_seconds()));
+			wi::backlog::post_backlog("Building BVHs for vertex AO took " + wi::helper::GetTimerDurationText((float)timer.elapsed_seconds()));
 		}
 
 		for (auto& x : this->editor->translator.selected)
@@ -818,7 +818,7 @@ void ObjectWindow::Create(EditorComponent* _editor)
 						objectcomponent->vertex_ao[args.jobIndex] = uint8_t(accum * 255);
 					});
 					wi::jobsystem::Wait(ctx);
-					wi::backlog::post("Vertex AO baking took " + wi::helper::GetTimerDurationText((float)timer.elapsed_seconds()));
+					wi::backlog::post_backlog("Vertex AO baking took " + wi::helper::GetTimerDurationText((float)timer.elapsed_seconds()));
 				}
 				objectcomponent->CreateRenderData();
 			}

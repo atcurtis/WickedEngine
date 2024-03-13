@@ -538,7 +538,7 @@ void PaintToolWindow::Update(float dt)
 					material->textures[sel].resource.SetTexture(texture, srgb_subresource);
 					editTexture = GetEditTextureSlot(*material, &uvset);
 
-					wi::backlog::post("Paint Tool created default texture: " + texturename);
+					wi::backlog::post_backlog("Paint Tool created default texture: " + texturename);
 				}
 
 				if (!editTexture.texture.IsValid())
